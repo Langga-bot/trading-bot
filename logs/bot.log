@@ -1,0 +1,282 @@
+2026-03-30 07:11:18 [INFO] database — [DB] Database siap: data/trades.db
+2026-03-30 07:11:18 [INFO] main — ============================================================
+2026-03-30 07:11:18 [INFO] main —    Pairs    : btc_idr, sol_idr, eth_idr
+2026-03-30 07:11:18 [INFO] main —    Interval : 15s
+2026-03-30 07:11:18 [INFO] main —    Dry Run  : True
+2026-03-30 07:11:18 [INFO] main — ============================================================
+2026-03-30 07:11:18 [INFO] main — [BOT] Bot mulai berjalan...
+2026-03-30 07:11:19 [INFO] main — [BOT] Iterasi #1 | 07:11:19
+2026-03-30 07:11:20 [WARNING] api — [API] OHLCV error for btc_idr: Expecting value: line 1 column 1 (char 0)
+2026-03-30 07:11:21 [WARNING] api — [API] Public GET error (attempt 1): 403 Client Error: Forbidden for url: https://indodax.com/api/btc_idr/depth
+2026-03-30 07:11:26 [WARNING] api — [API] Public GET error (attempt 2): 403 Client Error: Forbidden for url: https://indodax.com/api/btc_idr/depth
+2026-03-30 07:11:32 [WARNING] api — [API] Public GET error (attempt 3): 403 Client Error: Forbidden for url: https://indodax.com/api/btc_idr/depth
+2026-03-30 07:11:32 [ERROR] main — [BOT] API error untuk btc_idr: Failed after 3 retries: btc_idr/depth
+2026-03-30 07:11:32 [WARNING] api — [API] OHLCV error for sol_idr: Expecting value: line 1 column 1 (char 0)
+2026-03-30 07:11:32 [WARNING] api — [API] Public GET error (attempt 1): 403 Client Error: Forbidden for url: https://indodax.com/api/sol_idr/depth
+2026-03-30 07:11:38 [WARNING] api — [API] Public GET error (attempt 2): 403 Client Error: Forbidden for url: https://indodax.com/api/sol_idr/depth
+2026-03-30 07:11:44 [WARNING] api — [API] Public GET error (attempt 3): 403 Client Error: Forbidden for url: https://indodax.com/api/sol_idr/depth
+2026-03-30 07:11:44 [ERROR] main — [BOT] API error untuk sol_idr: Failed after 3 retries: sol_idr/depth
+2026-03-30 07:11:45 [WARNING] api — [API] OHLCV error for eth_idr: Expecting value: line 1 column 1 (char 0)
+2026-03-30 07:11:45 [WARNING] api — [API] Public GET error (attempt 1): 403 Client Error: Forbidden for url: https://indodax.com/api/eth_idr/depth
+2026-03-30 07:11:51 [WARNING] api — [API] Public GET error (attempt 2): 403 Client Error: Forbidden for url: https://indodax.com/api/eth_idr/depth
+2026-03-30 07:11:57 [WARNING] api — [API] Public GET error (attempt 3): 403 Client Error: Forbidden for url: https://indodax.com/api/eth_idr/depth
+2026-03-30 07:11:57 [ERROR] main — [BOT] API error untuk eth_idr: Failed after 3 retries: eth_idr/depth
+2026-03-30 07:11:58 [INFO] main — [BOT] Selesai dalam 39.6s | Tidur 0.0s
+2026-03-30 07:11:58 [INFO] main — [BOT] Iterasi #2 | 07:11:58
+2026-03-30 07:11:58 [WARNING] api — [API] OHLCV error for btc_idr: Expecting value: line 1 column 1 (char 0)
+2026-03-30 07:11:58 [INFO] main — 
+[BOT] Shutdown signal diterima...
+2026-03-30 07:11:59 [WARNING] api — [API] Public GET error (attempt 1): 403 Client Error: Forbidden for url: https://indodax.com/api/btc_idr/depth
+2026-03-30 07:12:05 [WARNING] api — [API] Public GET error (attempt 2): 403 Client Error: Forbidden for url: https://indodax.com/api/btc_idr/depth
+2026-03-30 07:12:11 [WARNING] api — [API] Public GET error (attempt 3): 403 Client Error: Forbidden for url: https://indodax.com/api/btc_idr/depth
+2026-03-30 07:12:11 [ERROR] main — [BOT] API error untuk btc_idr: Failed after 3 retries: btc_idr/depth
+2026-03-30 07:12:11 [WARNING] api — [API] OHLCV error for sol_idr: Expecting value: line 1 column 1 (char 0)
+2026-03-30 07:12:12 [WARNING] api — [API] Public GET error (attempt 1): 403 Client Error: Forbidden for url: https://indodax.com/api/sol_idr/depth
+2026-03-30 07:12:19 [WARNING] api — [API] Public GET error (attempt 2): 403 Client Error: Forbidden for url: https://indodax.com/api/sol_idr/depth
+2026-03-30 07:12:21 [INFO] main — 
+[BOT] Shutdown signal diterima...
+2026-03-30 07:12:25 [WARNING] api — [API] Public GET error (attempt 3): 403 Client Error: Forbidden for url: https://indodax.com/api/sol_idr/depth
+2026-03-30 07:12:25 [ERROR] main — [BOT] API error untuk sol_idr: Failed after 3 retries: sol_idr/depth
+2026-03-30 07:12:25 [WARNING] api — [API] OHLCV error for eth_idr: Expecting value: line 1 column 1 (char 0)
+2026-03-30 07:12:26 [WARNING] api — [API] Public GET error (attempt 1): 403 Client Error: Forbidden for url: https://indodax.com/api/eth_idr/depth
+2026-03-30 07:12:33 [WARNING] api — [API] Public GET error (attempt 2): 403 Client Error: Forbidden for url: https://indodax.com/api/eth_idr/depth
+2026-03-30 07:12:39 [WARNING] api — [API] Public GET error (attempt 3): 403 Client Error: Forbidden for url: https://indodax.com/api/eth_idr/depth
+2026-03-30 07:12:39 [ERROR] main — [BOT] API error untuk eth_idr: Failed after 3 retries: eth_idr/depth
+2026-03-30 07:12:39 [INFO] main — [BOT] Selesai dalam 40.9s | Tidur 0.0s
+2026-03-30 07:12:39 [INFO] main — [BOT] Graceful shutdown dimulai...
+2026-03-30 07:12:39 [INFO] main — [BOT] Stats hari ini: trades=0 | PnL=+0 IDR
+2026-03-30 07:15:59 [WARNING] api - [API] ccxt tidak terinstall. Jalankan: pip install ccxt
+2026-03-30 07:16:01 [INFO] database - [DB] Database siap: data/trades.db
+2026-03-30 07:16:01 [INFO] notifier - [NOTIF] Telegram nonaktif (enabled=False di config.py)
+2026-03-30 07:16:01 [INFO] main - ============================================================
+2026-03-30 07:16:01 [INFO] main - [BOT] Indodax Trading Bot Initialized
+2026-03-30 07:16:01 [INFO] main -    Pairs    : btc_idr, sol_idr, eth_idr
+2026-03-30 07:16:01 [INFO] main -    Interval : 15s
+2026-03-30 07:16:01 [INFO] main -    Dry Run  : True
+2026-03-30 07:16:01 [INFO] main -    Telegram : nonaktif (Telegram disabled)
+2026-03-30 07:16:01 [INFO] main - ============================================================
+2026-03-30 07:16:01 [INFO] main - [BOT] Bot mulai berjalan...
+2026-03-30 07:16:01 [INFO] main - 
+--------------------------------------------------
+2026-03-30 07:16:01 [INFO] main - [BOT] Iterasi #1 | 07:16:01
+2026-03-30 07:16:03 [INFO] api - [API] Summaries OK: btc_idr=1,127,938,000, sol_idr=1,385,000, eth_idr=33,900,000
+2026-03-30 07:16:03 [INFO] main - [BOT] Proses BTC_IDR
+2026-03-30 07:16:03 [WARNING] api - [API] Fallback ticker candle btc_idr (price=1,127,938,000) - sinyal tidak reliable
+2026-03-30 07:16:04 [INFO] strategy - [STRATEGY] Buy Score=2.0 | Sell Score=1.0 | RSI=54.8 | Trend=sideways
+2026-03-30 07:16:04 [INFO] main - [BOT] btc_idr -> Action=HOLD | Confidence=0% | EMA(1127777334/1127829385) | RSI=54.8 | MACD=2167.0348 | BB=neutral | Trend=sideways | Vol_spike=False
+2026-03-30 07:16:05 [INFO] main - [BOT] Proses SOL_IDR
+2026-03-30 07:16:06 [WARNING] api - [API] Fallback ticker candle sol_idr (price=1,385,000) - sinyal tidak reliable
+2026-03-30 07:16:07 [INFO] strategy - [STRATEGY] Buy Score=6.7 | Sell Score=1.0 | RSI=55.9 | Trend=sideways
+2026-03-30 07:16:07 [INFO] main - [BOT] sol_idr -> Action=BUY | Confidence=67% | EMA(1384965/1384838) | RSI=55.9 | MACD=89.5991 | BB=near_upper | Trend=sideways | Vol_spike=False
+2026-03-30 07:16:07 [INFO] main - [BUY] sol_idr | price=1,385,000 | IDR=1,000,000 | confidence=67%
+2026-03-30 07:16:07 [INFO] risk_management - [RISK] Posisi dibuka: sol_idr | Entry=1,385,000 | SL=1,357,300 | TP=1,426,550
+2026-03-30 07:16:08 [INFO] main - [BOT] Proses ETH_IDR
+2026-03-30 07:16:08 [WARNING] api - [API] Fallback ticker candle eth_idr (price=33,900,000) - sinyal tidak reliable
+2026-03-30 07:16:10 [INFO] strategy - [STRATEGY] Buy Score=0.0 | Sell Score=2.0 | RSI=45.9 | Trend=sideways
+2026-03-30 07:16:10 [INFO] main - [BOT] eth_idr -> Action=HOLD | Confidence=0% | EMA(33890664/33897687) | RSI=45.9 | MACD=-2191.5649 | BB=neutral | Trend=sideways | Vol_spike=False
+2026-03-30 07:16:10 [INFO] main - [BOT] Selesai dalam 8.9s | Tidur 6.1s
+2026-03-30 07:16:16 [INFO] main - 
+--------------------------------------------------
+2026-03-30 07:16:16 [INFO] main - [BOT] Iterasi #2 | 07:16:16
+2026-03-30 07:16:17 [INFO] api - [API] Summaries OK: btc_idr=1,126,000,000, sol_idr=1,389,713, eth_idr=33,932,000
+2026-03-30 07:16:17 [INFO] main - [BOT] Proses BTC_IDR
+2026-03-30 07:16:18 [WARNING] api - [API] Fallback ticker candle btc_idr (price=1,126,000,000) - sinyal tidak reliable
+2026-03-30 07:16:20 [INFO] strategy - [STRATEGY] Buy Score=0.0 | Sell Score=2.0 | RSI=49.6 | Trend=sideways
+2026-03-30 07:16:20 [INFO] main - [BOT] btc_idr -> Action=HOLD | Confidence=0% | EMA(1126070550/1126144212) | RSI=49.6 | MACD=-55027.2580 | BB=neutral | Trend=sideways | Vol_spike=False
+2026-03-30 07:16:20 [INFO] main - [BOT] Proses SOL_IDR
+2026-03-30 07:16:22 [WARNING] api - [API] Fallback ticker candle sol_idr (price=1,389,713) - sinyal tidak reliable
+2026-03-30 07:16:23 [INFO] strategy - [STRATEGY] Buy Score=5.0 | Sell Score=0.0 | RSI=52.6 | Trend=sideways
+2026-03-30 07:16:23 [INFO] main - [BOT] sol_idr -> Action=HOLD | Confidence=0% | EMA(1390359/1390043) | RSI=52.6 | MACD=49.9711 | BB=neutral | Trend=sideways | Vol_spike=False
+2026-03-30 07:16:23 [INFO] main - [BOT] Proses ETH_IDR
+2026-03-30 07:16:24 [WARNING] api - [API] Fallback ticker candle eth_idr (price=33,932,000) - sinyal tidak reliable
+2026-03-30 07:16:25 [INFO] strategy - [STRATEGY] Buy Score=4.0 | Sell Score=1.0 | RSI=54.9 | Trend=sideways
+2026-03-30 07:16:25 [INFO] main - [BOT] eth_idr -> Action=HOLD | Confidence=0% | EMA(33946022/33935211) | RSI=54.9 | MACD=3410.0130 | BB=near_upper | Trend=sideways | Vol_spike=False
+2026-03-30 07:16:25 [INFO] main - [BOT] Selesai dalam 8.5s | Tidur 6.5s
+2026-03-30 07:16:31 [INFO] main - 
+[BOT] Shutdown signal diterima...
+2026-03-30 07:16:31 [INFO] main - [BOT] Graceful shutdown dimulai...
+2026-03-30 07:16:31 [INFO] main - [BOT] Stats hari ini: trades=1 | PnL=+0 IDR
+2026-03-30 07:16:32 [INFO] main - [BOT] Total stats: trades=0 | WR=0.0% | Net=+0 IDR
+2026-03-30 07:16:32 [INFO] main - [BOT] Bot berhasil dihentikan
+2026-03-30 07:20:28 [INFO] api - [API] ccxt Indodax exchange siap
+2026-03-30 07:20:28 [INFO] database - [DB] Database siap: data/trades.db
+2026-03-30 07:20:28 [WARNING] notifier - [NOTIF] Telegram dinonaktifkan - Token tidak valid
+2026-03-30 07:20:28 [INFO] main - ============================================================
+2026-03-30 07:20:28 [INFO] main - [BOT] Indodax Trading Bot Initialized
+2026-03-30 07:20:28 [INFO] main -    Pairs    : btc_idr, sol_idr, eth_idr
+2026-03-30 07:20:28 [INFO] main -    Interval : 60s
+2026-03-30 07:20:28 [INFO] main -    Dry Run  : False
+2026-03-30 07:20:28 [INFO] main -    Telegram : nonaktif (Telegram disabled)
+2026-03-30 07:20:28 [INFO] main - ============================================================
+2026-03-30 07:20:28 [INFO] main - [BOT] Bot mulai berjalan...
+2026-03-30 07:20:28 [INFO] main - 
+--------------------------------------------------
+2026-03-30 07:20:28 [INFO] main - [BOT] Iterasi #1 | 07:20:28
+2026-03-30 07:20:30 [INFO] api - [API] Summaries OK: btc_idr=1,143,250,000, sol_idr=1,408,741, eth_idr=34,538,000
+2026-03-30 07:20:30 [INFO] main - [BOT] Proses BTC_IDR
+2026-03-30 07:20:31 [INFO] api - [API] OHLCV ccxt OK: 100 candles (btc_idr)
+2026-03-30 07:20:31 [INFO] strategy - [STRATEGY] Buy Score=2.0 | Sell Score=7.0 | RSI=76.7 | Trend=sideways
+2026-03-30 07:20:31 [INFO] main - [BOT] btc_idr -> Action=SELL | Confidence=70% | EMA(1134465400/1130304222) | RSI=76.7 | MACD=1560017.3144 | BB=upper_touch | Trend=sideways | Vol_spike=True
+2026-03-30 07:20:32 [INFO] main - [BOT] Proses SOL_IDR
+2026-03-30 07:20:32 [INFO] api - [API] OHLCV ccxt OK: 100 candles (sol_idr)
+2026-03-30 07:20:33 [INFO] strategy - [STRATEGY] Buy Score=2.0 | Sell Score=7.0 | RSI=70.5 | Trend=sideways
+2026-03-30 07:20:33 [INFO] main - [BOT] sol_idr -> Action=SELL | Confidence=70% | EMA(1399412/1394572) | RSI=70.5 | MACD=1817.2046 | BB=upper_touch | Trend=sideways | Vol_spike=False
+2026-03-30 07:20:34 [INFO] main - [BOT] Proses ETH_IDR
+2026-03-30 07:20:34 [INFO] api - [API] OHLCV ccxt OK: 100 candles (eth_idr)
+2026-03-30 07:20:34 [INFO] strategy - [STRATEGY] Buy Score=3.0 | Sell Score=7.0 | RSI=84.0 | Trend=sideways
+2026-03-30 07:20:34 [INFO] main - [BOT] eth_idr -> Action=SELL | Confidence=70% | EMA(34202761/34024611) | RSI=84.0 | MACD=58736.0308 | BB=upper_touch | Trend=sideways | Vol_spike=True
+2026-03-30 07:20:34 [INFO] main - [BOT] Selesai dalam 5.5s | Tidur 54.5s
+2026-03-30 07:21:02 [INFO] main - 
+[BOT] Shutdown signal diterima...
+2026-03-30 07:21:28 [INFO] main - [BOT] Graceful shutdown dimulai...
+2026-03-30 07:21:28 [INFO] main - [BOT] Stats hari ini: trades=0 | PnL=+0 IDR
+2026-03-30 07:21:28 [INFO] main - [BOT] Total stats: trades=0 | WR=0.0% | Net=+0 IDR
+2026-03-30 07:21:29 [INFO] main - [BOT] Bot berhasil dihentikan
+2026-03-30 07:23:41 [INFO] api - [API] ccxt Indodax exchange siap
+2026-03-30 07:23:41 [INFO] database - [DB] Database siap: data/trades.db
+2026-03-30 07:23:41 [INFO] notifier - [NOTIF] Telegram aktif -> chat_id=6570267651
+2026-03-30 07:23:41 [INFO] telegram_cmd - [CMD] Telegram command handler thread dimulai
+2026-03-30 07:23:41 [INFO] main - [BOT] Telegram command handler thread dimulai
+2026-03-30 07:23:41 [INFO] main - ============================================================
+2026-03-30 07:23:41 [INFO] main - [BOT] Indodax Trading Bot Initialized
+2026-03-30 07:23:41 [INFO] main -    Pairs    : btc_idr, sol_idr, eth_idr
+2026-03-30 07:23:41 [INFO] main -    Interval : 60s
+2026-03-30 07:23:41 [INFO] main -    Dry Run  : False
+2026-03-30 07:23:41 [INFO] main -    Telegram : aktif
+2026-03-30 07:23:41 [INFO] main - ============================================================
+2026-03-30 07:23:43 [INFO] main - [BOT] Bot mulai berjalan...
+2026-03-30 07:23:43 [INFO] main - 
+--------------------------------------------------
+2026-03-30 07:23:43 [INFO] main - [BOT] Iterasi #1 | 07:23:43
+2026-03-30 07:23:44 [INFO] api - [API] Summaries OK: btc_idr=1,139,122,000, sol_idr=1,408,675, eth_idr=34,456,000
+2026-03-30 07:23:44 [INFO] main - [BOT] Proses BTC_IDR
+2026-03-30 07:23:45 [INFO] telegram_cmd - [CMD] /help dari 6570267651
+2026-03-30 07:23:45 [INFO] api - [API] OHLCV ccxt OK: 100 candles (btc_idr)
+2026-03-30 07:23:46 [INFO] strategy - [STRATEGY] Buy Score=3.0 | Sell Score=0.0 | RSI=63.1 | Trend=uptrend
+2026-03-30 07:23:46 [INFO] main - [BOT] btc_idr -> Action=HOLD | Confidence=0% | EMA(1138566512/1132794331) | RSI=63.1 | MACD=1571467.8292 | BB=neutral | Trend=uptrend | Vol_spike=False
+2026-03-30 07:23:46 [INFO] telegram_cmd - [CMD] /help dari 6570267651
+2026-03-30 07:23:47 [INFO] main - [BOT] Proses SOL_IDR
+2026-03-30 07:23:47 [INFO] api - [API] OHLCV ccxt OK: 100 candles (sol_idr)
+2026-03-30 07:23:47 [INFO] strategy - [STRATEGY] Buy Score=4.0 | Sell Score=3.0 | RSI=67.0 | Trend=uptrend
+2026-03-30 07:23:47 [INFO] main - [BOT] sol_idr -> Action=HOLD | Confidence=0% | EMA(1405253/1397853) | RSI=67.0 | MACD=2061.8978 | BB=near_upper | Trend=uptrend | Vol_spike=False
+2026-03-30 07:23:48 [INFO] main - [BOT] Proses ETH_IDR
+2026-03-30 07:23:48 [INFO] api - [API] OHLCV ccxt OK: 100 candles (eth_idr)
+2026-03-30 07:23:49 [INFO] strategy - [STRATEGY] Buy Score=3.0 | Sell Score=5.0 | RSI=74.9 | Trend=uptrend
+2026-03-30 07:23:49 [INFO] main - [BOT] eth_idr -> Action=HOLD | Confidence=0% | EMA(34339251/34111693) | RSI=74.9 | MACD=57819.5457 | BB=near_upper | Trend=uptrend | Vol_spike=False
+2026-03-30 07:23:49 [INFO] main - [BOT] Selesai dalam 5.4s | Tidur 54.6s
+2026-03-30 07:23:50 [INFO] main - 
+[BOT] Shutdown signal diterima...
+2026-03-30 07:24:43 [INFO] main - [BOT] Graceful shutdown dimulai...
+2026-03-30 07:24:43 [INFO] main - [BOT] Menghentikan Telegram command thread...
+2026-03-30 07:24:43 [INFO] main - [BOT] Stats hari ini: trades=0 | PnL=+0 IDR
+2026-03-30 07:24:46 [INFO] main - [BOT] Total stats: trades=0 | WR=0.0% | Net=+0 IDR
+2026-03-30 07:24:46 [INFO] main - [BOT] Bot berhasil dihentikan
+2026-03-30 07:26:56 [INFO] api - [API] ccxt Indodax exchange siap
+2026-03-30 07:26:56 [INFO] database - [DB] Database siap: data/trades.db
+2026-03-30 07:26:56 [INFO] notifier - [NOTIF] Telegram aktif -> chat_id=6570267651
+2026-03-30 07:26:56 [INFO] telegram_cmd - [CMD] Telegram command handler thread dimulai
+2026-03-30 07:26:56 [INFO] main - [BOT] Telegram command handler thread dimulai
+2026-03-30 07:26:56 [INFO] main - ============================================================
+2026-03-30 07:26:56 [INFO] main - [BOT] Indodax Trading Bot Initialized
+2026-03-30 07:26:56 [INFO] main -    Pairs    : btc_idr, sol_idr, eth_idr
+2026-03-30 07:26:56 [INFO] main -    Interval : 60s
+2026-03-30 07:26:56 [INFO] main -    Dry Run  : False
+2026-03-30 07:26:56 [INFO] main -    Telegram : aktif
+2026-03-30 07:26:56 [INFO] main - ============================================================
+2026-03-30 07:26:59 [INFO] main - [BOT] Bot mulai berjalan...
+2026-03-30 07:26:59 [INFO] main - 
+--------------------------------------------------
+2026-03-30 07:26:59 [INFO] main - [BOT] Iterasi #1 | 07:26:59
+2026-03-30 07:27:03 [INFO] api - [API] Summaries OK: btc_idr=1,138,678,000, sol_idr=1,408,127, eth_idr=34,310,000
+2026-03-30 07:27:03 [INFO] main - [BOT] Proses BTC_IDR
+2026-03-30 07:27:09 [INFO] telegram_cmd - [CMD] /status dari 6570267651
+2026-03-30 07:27:09 [INFO] database - [DB] Database siap: data/trades.db
+2026-03-30 07:27:10 [INFO] api - [API] OHLCV ccxt OK: 100 candles (btc_idr)
+2026-03-30 07:27:11 [INFO] strategy - [STRATEGY] Buy Score=4.0 | Sell Score=0.0 | RSI=62.0 | Trend=uptrend
+2026-03-30 07:27:11 [INFO] main - [BOT] btc_idr -> Action=HOLD | Confidence=0% | EMA(1139333019/1134618847) | RSI=62.0 | MACD=639323.9014 | BB=neutral | Trend=uptrend | Vol_spike=False
+2026-03-30 07:27:12 [INFO] main - [BOT] Proses SOL_IDR
+2026-03-30 07:27:12 [INFO] api - [API] OHLCV ccxt OK: 100 candles (sol_idr)
+2026-03-30 07:27:12 [INFO] strategy - [STRATEGY] Buy Score=4.0 | Sell Score=0.0 | RSI=69.1 | Trend=uptrend
+2026-03-30 07:27:12 [INFO] main - [BOT] sol_idr -> Action=HOLD | Confidence=0% | EMA(1407770/1400817) | RSI=69.1 | MACD=1118.3139 | BB=neutral | Trend=uptrend | Vol_spike=False
+2026-03-30 07:27:13 [INFO] main - [BOT] Proses ETH_IDR
+2026-03-30 07:27:14 [INFO] api - [API] OHLCV ccxt OK: 100 candles (eth_idr)
+2026-03-30 07:27:15 [INFO] strategy - [STRATEGY] Buy Score=4.0 | Sell Score=0.0 | RSI=66.0 | Trend=uptrend
+2026-03-30 07:27:15 [INFO] main - [BOT] eth_idr -> Action=HOLD | Confidence=0% | EMA(34355963/34177403) | RSI=66.0 | MACD=21062.4742 | BB=neutral | Trend=uptrend | Vol_spike=False
+2026-03-30 07:27:15 [INFO] main - [BOT] Selesai dalam 15.7s | Tidur 44.3s
+2026-03-30 07:27:29 [INFO] telegram_cmd - [CMD] /help dari 6570267651
+2026-03-30 07:27:42 [INFO] main - 
+[BOT] Shutdown signal diterima...
+2026-03-30 07:27:59 [INFO] main - [BOT] Graceful shutdown dimulai...
+2026-03-30 07:27:59 [INFO] main - [BOT] Menghentikan Telegram command thread...
+2026-03-30 07:27:59 [INFO] main - [BOT] Stats hari ini: trades=0 | PnL=+0 IDR
+2026-03-30 07:28:01 [INFO] main - [BOT] Total stats: trades=0 | WR=0.0% | Net=+0 IDR
+2026-03-30 07:28:01 [INFO] main - [BOT] Bot berhasil dihentikan
+2026-03-30 07:59:28 [INFO] api - [API] ccxt Indodax exchange siap
+2026-03-30 07:59:28 [INFO] database - [DB] Database siap: data/trades.db
+2026-03-30 07:59:28 [INFO] notifier - [NOTIF] Telegram aktif -> chat_id=6570267651
+2026-03-30 07:59:28 [INFO] telegram_cmd - [CMD] Telegram command handler thread dimulai
+2026-03-30 07:59:28 [INFO] main - [BOT] Telegram command handler thread dimulai
+2026-03-30 07:59:28 [INFO] main - ============================================================
+2026-03-30 07:59:28 [INFO] main - [BOT] Indodax Trading Bot Initialized
+2026-03-30 07:59:28 [INFO] main -    Pairs    : btc_idr, sol_idr, eth_idr, xrp_idr, doge_idr, ada_idr, pippin_idr, bnb_idr, xaut_idr, gxc_idr, moonpig_idr
+2026-03-30 07:59:28 [INFO] main -    Interval : 60s
+2026-03-30 07:59:28 [INFO] main -    Dry Run  : False
+2026-03-30 07:59:28 [INFO] main -    Telegram : aktif
+2026-03-30 07:59:28 [INFO] main - ============================================================
+2026-03-30 07:59:31 [INFO] main - [BOT] Bot mulai berjalan...
+2026-03-30 07:59:31 [INFO] main - 
+--------------------------------------------------
+2026-03-30 07:59:31 [INFO] main - [BOT] Iterasi #1 | 07:59:31
+2026-03-30 07:59:35 [INFO] api - [API] Summaries OK: btc_idr=1,134,317,000, sol_idr=1,398,377, eth_idr=34,105,000, xrp_idr=22,754, doge_idr=1,559, ada_idr=4,112, pippin_idr=903, bnb_idr=10,484,465, xaut_idr=75,525,001, gxc_idr=5,587, moonpig_idr=6
+2026-03-30 07:59:35 [INFO] main - [BOT] Proses BTC_IDR
+2026-03-30 07:59:37 [INFO] api - [API] OHLCV ccxt OK: 100 candles (btc_idr)
+2026-03-30 07:59:38 [INFO] strategy - [STRATEGY] Buy Score=0.0 | Sell Score=2.0 | RSI=51.9 | Trend=sideways
+2026-03-30 07:59:38 [INFO] main - [BOT] btc_idr -> Action=HOLD | Confidence=0% | EMA(1132884890/1133849620) | RSI=51.9 | MACD=-21945.8996 | BB=neutral | Trend=sideways | Vol_spike=False
+2026-03-30 07:59:40 [INFO] main - [BOT] Proses SOL_IDR
+2026-03-30 07:59:40 [INFO] api - [API] OHLCV ccxt OK: 100 candles (sol_idr)
+2026-03-30 07:59:40 [INFO] strategy - [STRATEGY] Buy Score=2.0 | Sell Score=1.0 | RSI=50.1 | Trend=sideways
+2026-03-30 07:59:40 [INFO] main - [BOT] sol_idr -> Action=HOLD | Confidence=0% | EMA(1397562/1398260) | RSI=50.1 | MACD=314.5157 | BB=neutral | Trend=sideways | Vol_spike=False
+2026-03-30 07:59:41 [INFO] main - [BOT] Proses ETH_IDR
+2026-03-30 07:59:41 [INFO] api - [API] OHLCV ccxt OK: 100 candles (eth_idr)
+2026-03-30 07:59:44 [INFO] strategy - [STRATEGY] Buy Score=2.0 | Sell Score=1.0 | RSI=44.8 | Trend=sideways
+2026-03-30 07:59:44 [INFO] main - [BOT] eth_idr -> Action=HOLD | Confidence=0% | EMA(34119754/34156701) | RSI=44.8 | MACD=-3049.1127 | BB=neutral | Trend=sideways | Vol_spike=False
+2026-03-30 07:59:45 [INFO] main - [BOT] Proses XRP_IDR
+2026-03-30 07:59:45 [INFO] api - [API] OHLCV ccxt OK: 100 candles (xrp_idr)
+2026-03-30 07:59:46 [INFO] strategy - [STRATEGY] Buy Score=0.0 | Sell Score=1.0 | RSI=42.3 | Trend=sideways
+2026-03-30 07:59:46 [INFO] main - [BOT] xrp_idr -> Action=HOLD | Confidence=0% | EMA(22764/22776) | RSI=42.3 | MACD=0.7113 | BB=neutral | Trend=sideways | Vol_spike=False
+2026-03-30 07:59:47 [INFO] main - [BOT] Proses DOGE_IDR
+2026-03-30 07:59:47 [INFO] api - [API] OHLCV ccxt OK: 100 candles (doge_idr)
+2026-03-30 07:59:48 [INFO] strategy - [STRATEGY] Buy Score=3.0 | Sell Score=0.0 | RSI=51.9 | Trend=sideways
+2026-03-30 07:59:48 [INFO] main - [BOT] doge_idr -> Action=HOLD | Confidence=0% | EMA(1559/1559) | RSI=51.9 | MACD=0.1079 | BB=neutral | Trend=sideways | Vol_spike=False
+2026-03-30 07:59:49 [INFO] main - [BOT] Proses ADA_IDR
+2026-03-30 07:59:50 [INFO] api - [API] OHLCV ccxt OK: 100 candles (ada_idr)
+2026-03-30 07:59:50 [INFO] strategy - [STRATEGY] Buy Score=1.0 | Sell Score=1.0 | RSI=32.2 | Trend=sideways
+2026-03-30 07:59:50 [INFO] main - [BOT] ada_idr -> Action=HOLD | Confidence=0% | EMA(4113/4122) | RSI=32.2 | MACD=-0.9736 | BB=neutral | Trend=sideways | Vol_spike=False
+2026-03-30 07:59:51 [INFO] main - [BOT] Proses PIPPIN_IDR
+2026-03-30 07:59:51 [INFO] api - [API] OHLCV ccxt OK: 100 candles (pippin_idr)
+2026-03-30 07:59:52 [INFO] strategy - [STRATEGY] Buy Score=2.0 | Sell Score=3.3 | RSI=47.1 | Trend=sideways
+2026-03-30 07:59:52 [INFO] main - [BOT] pippin_idr -> Action=HOLD | Confidence=0% | EMA(903/904) | RSI=47.1 | MACD=-0.1964 | BB=neutral | Trend=sideways | Vol_spike=True
+2026-03-30 07:59:53 [INFO] main - [BOT] Proses BNB_IDR
+2026-03-30 07:59:53 [INFO] api - [API] OHLCV ccxt OK: 100 candles (bnb_idr)
+2026-03-30 07:59:53 [INFO] strategy - [STRATEGY] Buy Score=2.0 | Sell Score=0.0 | RSI=66.6 | Trend=sideways
+2026-03-30 07:59:53 [INFO] main - [BOT] bnb_idr -> Action=HOLD | Confidence=0% | EMA(10470983/10447534) | RSI=66.6 | MACD=8710.6515 | BB=neutral | Trend=sideways | Vol_spike=False
+2026-03-30 07:59:54 [INFO] main - [BOT] Proses XAUT_IDR
+2026-03-30 07:59:54 [INFO] api - [API] OHLCV ccxt OK: 100 candles (xaut_idr)
+2026-03-30 07:59:55 [INFO] strategy - [STRATEGY] Buy Score=5.0 | Sell Score=4.0 | RSI=5.7 | Trend=downtrend
+2026-03-30 07:59:55 [INFO] main - [BOT] xaut_idr -> Action=HOLD | Confidence=0% | EMA(75656978/76133549) | RSI=5.7 | MACD=-100724.3385 | BB=near_lower | Trend=downtrend | Vol_spike=False
+2026-03-30 07:59:56 [INFO] main - [BOT] Proses GXC_IDR
+2026-03-30 07:59:57 [INFO] api - [API] OHLCV dari trades OK: 149 candles (gxc_idr)
+2026-03-30 07:59:57 [INFO] strategy - [STRATEGY] Buy Score=2.0 | Sell Score=4.0 | RSI=44.4 | Trend=downtrend
+2026-03-30 07:59:57 [INFO] main - [BOT] gxc_idr -> Action=HOLD | Confidence=0% | EMA(5607/5633) | RSI=44.4 | MACD=-4.3675 | BB=neutral | Trend=downtrend | Vol_spike=False
+2026-03-30 07:59:58 [INFO] main - [BOT] Proses MOONPIG_IDR
+2026-03-30 07:59:58 [INFO] api - [API] OHLCV ccxt OK: 100 candles (moonpig_idr)
+2026-03-30 07:59:59 [INFO] strategy - [STRATEGY] Buy Score=3.0 | Sell Score=0.0 | RSI=0.0 | Trend=sideways
+2026-03-30 07:59:59 [INFO] main - [BOT] moonpig_idr -> Action=HOLD | Confidence=0% | EMA(6/6) | RSI=0.0 | MACD=-0.0001 | BB=neutral | Trend=sideways | Vol_spike=False
+2026-03-30 07:59:59 [INFO] main - [BOT] Selesai dalam 27.8s | Tidur 32.2s
+2026-03-30 08:00:02 [INFO] main - 
+[BOT] Shutdown signal diterima...
+2026-03-30 08:00:31 [INFO] main - [BOT] Graceful shutdown dimulai...
+2026-03-30 08:00:31 [INFO] main - [BOT] Menghentikan Telegram command thread...
+2026-03-30 08:00:31 [INFO] main - [BOT] Stats hari ini: trades=0 | PnL=+0 IDR
+2026-03-30 08:00:33 [INFO] main - [BOT] Total stats: trades=0 | WR=0.0% | Net=+0 IDR
+2026-03-30 08:00:33 [INFO] main - [BOT] Bot berhasil dihentikan
