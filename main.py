@@ -9,6 +9,9 @@ import json
 import threading
 import requests
 from datetime import datetime, time as dt_time
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def setup_logging(level: str = "INFO") -> None:
     os.makedirs("logs", exist_ok=True)
@@ -63,16 +66,11 @@ class TelegramCommandThread(threading.Thread):
     def __init__(self, bot_ref):
         super().__init__(daemon=True, name="TelegramCMD")
         self.bot      = bot_ref
-        self.token    = TELEGRAM_CONFIG.get("bot_token", "").strip()
+        self.token    = TELEGRAM_CONFIG.get("bot_token", "")
+        self.chat_id  = str(TELEGRAM_CONFIG.get("chat_id", ""))
         self.base_url = f"https://api.telegram.org/bot{self.token}"
         self.running  = True
         self.log      = logging.getLogger("telegram_cmd")
-
-        raw_chat = str(TELEGRAM_CONFIG.get("chat_id", "")).strip().strip('"').strip("'")
-        self.allowed_ids = {c.strip() for c in raw_chat.split(",") if c.strip()}
-        # Primary chat_id untuk kirim notifikasi
-        self.chat_id = next(iter(self.allowed_ids), "")
-        self.log.debug(f"[CMD] Allowed chat IDs: {self.allowed_ids}")
 
 
     def _get(self, method: str, params: dict = None, timeout: int = 40) -> dict:
@@ -87,12 +85,9 @@ class TelegramCommandThread(threading.Thread):
             self.log.debug(f"TG GET: {e}")
             return {}
 
-    def _send(self, text: str, reply_id: int = None, to_chat: str = None) -> bool:
-        target = to_chat or self.chat_id
-        if not target:
-            return False
+    def _send(self, text: str, reply_id: int = None) -> bool:
         payload = {
-            "chat_id":                  target,
+            "chat_id":                  self.chat_id,
             "text":                     text,
             "parse_mode":               "HTML",
             "disable_web_page_preview": True,
@@ -116,7 +111,7 @@ class TelegramCommandThread(threading.Thread):
         return pair.upper().replace("_", "/")
 
 
-    def _cmd_start(self, mid, chat_id=None):
+    def _cmd_start(self, mid):
         self._send(
             f"{E['rocket']} <b>Selamat datang di Indodax Trading Bot!</b>\n"
             f"<code>{DLINE}</code>\n\n"
@@ -136,12 +131,12 @@ class TelegramCommandThread(threading.Thread):
             f"{E['rocket']} /help      — Bantuan lengkap\n"
             f"<code>{LINE}</code>\n"
             f"{E['clock']} <i>{self._now()}</i>",
-            reply_id=mid, to_chat=chat_id,
+            reply_id=mid,
         )
 
-    def _cmd_help(self, mid, chat_id=None):
+    def _cmd_help(self, mid):
         self._send(
-           "{E['rocket']} <b>Selamat datang di Indodax Trading Bot!</b>\n"
+            f"{E['rocket']} <b>Selamat datang di Indodax Trading Bot!</b>\n"
             f"<code>{DLINE}</code>\n"
             f"\n"
             f"{E['robot']} Bot trading otomatis untuk exchange <b>Indodax</b>\n"
@@ -163,10 +158,10 @@ class TelegramCommandThread(threading.Thread):
             f"<code>{LINE}</code>\n"
             f"\n"
             f"<i>Ketik perintah di atas untuk memulai.</i>",
-            reply_id=mid, to_chat=chat_id,
+            reply_id=mid,
         )
 
-    def _cmd_status(self, mid, chat_id=None):
+    def _cmd_status(self, mid):
         db        = Database()
         stats     = db.get_overall_stats() or {}
         is_paused = os.path.exists(self.PAUSE_FLAG)
@@ -203,11 +198,11 @@ class TelegramCommandThread(threading.Thread):
             f"{E['target']} Win Rate    ›  <code>{winrate:.1f}%</code>\n"
             f"{pnl_e} Net PnL      ›  <code>Rp {net_pnl:+,.0f}</code>\n\n"
             f"{E['clock']} <i>{self._now()}</i>",
-            reply_id=mid, to_chat=chat_id,
+            reply_id=mid,
         )
 
-    def _cmd_harga(self, mid, chat_id=None):
-        self._send(f"{E['chart']} Mengambil harga real-time...", reply_id=mid, to_chat=chat_id)
+    def _cmd_harga(self, mid):
+        self._send(f"{E['chart']} Mengambil harga real-time...", reply_id=mid)
         try:
             tickers = self.bot.api.fetch_all_tickers(TRADING_PAIRS)
             rows    = []
@@ -234,8 +229,8 @@ class TelegramCommandThread(threading.Thread):
         except Exception as e:
             self._send(f"{E['cross']} Gagal ambil harga: {e}")
 
-    def _cmd_saldo(self, mid, chat_id=None):
-        self._send(f"{E['key']} Mengambil saldo...", reply_id=mid, to_chat=chat_id)
+    def _cmd_saldo(self, mid):
+        self._send(f"{E['key']} Mengambil saldo...", reply_id=mid)
         try:
             info  = self.bot.api.get_balance()
             bal   = info.get("balance", {})
@@ -258,7 +253,7 @@ class TelegramCommandThread(threading.Thread):
         except Exception as e:
             self._send(f"{E['cross']} Gagal ambil saldo: {e}")
 
-    def _cmd_posisi(self, mid, chat_id=None):
+    def _cmd_posisi(self, mid):
         positions = self.bot.risk.positions
         if not positions:
             self._send(
@@ -292,10 +287,10 @@ class TelegramCommandThread(threading.Thread):
             + "\n\n".join(rows) +
             f"\n\n<code>{LINE}</code>\n"
             f"{E['clock']} <i>{self._now()}</i>",
-            reply_id=mid, to_chat=chat_id,
+            reply_id=mid,
         )
 
-    def _cmd_laporan(self, mid, chat_id=None):
+    def _cmd_laporan(self, mid):
         from datetime import date
         db      = Database()
         trades  = db.get_trade_history(limit=500)
@@ -321,10 +316,10 @@ class TelegramCommandThread(threading.Thread):
             f"<code>{LINE}</code>\n"
             f"{pnl_e} <b>Net PnL</b>    ›  <code>Rp {sign}{net:,.0f}</code>\n\n"
             f"{E['clock']} <i>{self._now()}</i>",
-            reply_id=mid, to_chat=chat_id,
+            reply_id=mid,
         )
 
-    def _cmd_history(self, mid, chat_id=None):
+    def _cmd_history(self, mid):
         db     = Database()
         trades = db.get_trade_history(limit=5)
         if not trades:
@@ -353,10 +348,10 @@ class TelegramCommandThread(threading.Thread):
             + "\n\n".join(rows) +
             f"\n\n<code>{LINE}</code>\n"
             f"{E['clock']} <i>{self._now()}</i>",
-            reply_id=mid, to_chat=chat_id,
+            reply_id=mid,
         )
 
-    def _cmd_pair(self, mid, chat_id=None):
+    def _cmd_pair(self, mid):
         pairs_str = "\n".join(
             f"  {i+1}. {E['diamond']} <code>{self._sym(p)}</code>"
             for i, p in enumerate(TRADING_PAIRS)
@@ -366,10 +361,10 @@ class TelegramCommandThread(threading.Thread):
             f"<code>{DLINE}</code>\n\n"
             f"{pairs_str}\n\n"
             f"{E['clock']} <i>{self._now()}</i>",
-            reply_id=mid, to_chat=chat_id,
+            reply_id=mid,
         )
 
-    def _cmd_config(self, mid, chat_id=None):
+    def _cmd_config(self, mid):
         bc = BOT_CONFIG
         rc = RISK_CONFIG
         self._send(
@@ -389,10 +384,10 @@ class TelegramCommandThread(threading.Thread):
             f"{E['down']} Max Loss/hari ›  <code>Rp {rc.get('max_daily_loss_idr',0):,.0f}</code>\n"
             f"{E['chart']} Max Trade/hari ›  <code>{rc.get('max_trades_per_day')}</code>\n\n"
             f"{E['clock']} <i>{self._now()}</i>",
-            reply_id=mid, to_chat=chat_id,
+            reply_id=mid,
         )
 
-    def _cmd_pause(self, mid, chat_id=None):
+    def _cmd_pause(self, mid):
         os.makedirs("data", exist_ok=True)
         with open(self.PAUSE_FLAG, "w") as f:
             f.write(self._now())
@@ -403,11 +398,11 @@ class TelegramCommandThread(threading.Thread):
             f"Posisi terbuka tetap dimonitor.\n\n"
             f"Ketik /resume untuk melanjutkan.\n"
             f"{E['clock']} <i>{self._now()}</i>",
-            reply_id=mid, to_chat=chat_id,
+            reply_id=mid,
         )
         logger.info("[CMD] Bot di-pause via Telegram")
 
-    def _cmd_resume(self, mid, chat_id=None):
+    def _cmd_resume(self, mid):
         if os.path.exists(self.PAUSE_FLAG):
             os.remove(self.PAUSE_FLAG)
             msg = (
@@ -421,14 +416,14 @@ class TelegramCommandThread(threading.Thread):
                 f"{E['info']} Bot tidak dalam kondisi pause.\n"
                 f"{E['clock']} <i>{self._now()}</i>"
             )
-        self._send(msg, reply_id=mid, to_chat=chat_id)
+        self._send(msg, reply_id=mid)
         logger.info("[CMD] Bot di-resume via Telegram")
 
     def _cmd_unknown(self, mid, cmd):
         self._send(
             f"{E['warn']} Perintah <code>{cmd}</code> tidak dikenal.\n"
             f"Ketik /help untuk daftar perintah.",
-            reply_id=mid, to_chat=chat_id,
+            reply_id=mid,
         )
 
 
@@ -451,15 +446,12 @@ class TelegramCommandThread(threading.Thread):
         msg     = update.get("message", {})
         if not msg:
             return
-        chat_id = str(msg.get("chat", {}).get("id", "")).strip()
+        chat_id = str(msg.get("chat", {}).get("id", ""))
         msg_id  = msg.get("message_id")
-        text    = (msg.get("text") or "").strip()
+        text    = msg.get("text", "").strip()
 
-        if chat_id not in self.allowed_ids:
-            self.log.warning(
-                f"[CMD] Ditolak dari chat {chat_id} "
-                f"(allowed: {self.allowed_ids})"
-            )
+        if chat_id != self.chat_id:
+            self.log.warning(f"[CMD] Pesan ditolak dari chat tidak dikenal: {chat_id}")
             return
         if not text.startswith("/"):
             return
@@ -470,14 +462,12 @@ class TelegramCommandThread(threading.Thread):
         handler_name = self.HANDLERS.get(cmd)
         if handler_name:
             try:
-                getattr(self, handler_name)(msg_id, chat_id)
-            except TypeError:d
                 getattr(self, handler_name)(msg_id)
             except Exception as e:
                 self.log.exception(f"[CMD] Error handler {cmd}: {e}")
-                self._send(f"{E['cross']} Error: {str(e)[:100]}", reply_id=msg_id, to_chat=chat_id)
+                self._send(f"{E['cross']} Error: {str(e)[:100]}", reply_id=msg_id)
         else:
-            self._cmd_unknown(msg_id, cmd, chat_id)
+            self._cmd_unknown(msg_id, cmd)
 
 
     def run(self):
@@ -618,7 +608,6 @@ class TradingBot:
                 except Exception as e:
                     logger.exception(f"[BOT] Unexpected error untuk {pair}: {e}")
                     self.notifier.notify_error(str(e), pair)
-                # Jeda kecil antar pair kecuali pair terakhir
                 if i < len(TRADING_PAIRS) - 1 and pair_delay > 0:
                     time.sleep(pair_delay)
 
@@ -627,7 +616,6 @@ class TradingBot:
             logger.info(f"[BOT] Selesai dalam {elapsed:.1f}s | Tidur {sleep_t:.1f}s")
             time.sleep(sleep_t)
 
-        # Shutdown
         self._graceful_shutdown()
 
     def run_once(self) -> None:
@@ -646,7 +634,6 @@ class TradingBot:
     def _process_pair(self, pair: str) -> None:
         logger.info(f"[BOT] Proses {pair.upper()}")
 
-        # ── 1. Ambil data market ──
         current_price = self.api.get_current_price(pair)
         if not current_price:
             logger.warning(f"[BOT] Gagal ambil harga {pair}")
@@ -662,12 +649,6 @@ class TradingBot:
 
         if not candles:
             logger.warning(f"[BOT] Tidak ada data candle untuk {pair}")
-            return
-
-        closes = [c.get("close", 0) for c in candles[-10:]]
-        is_synthetic = len(set(round(c, -2) for c in closes)) <= 2 and len(candles) >= 10
-        if is_synthetic and pair not in self.risk.positions:
-            logger.debug(f"[BOT] {pair} candle sintetis, skip entry")
             return
 
         decision = self.strategy.analyze_and_decide(candles, depth if depth else None)
@@ -798,12 +779,11 @@ class TradingBot:
                 logger.error(f"[SELL] Order gagal: {e}")
                 return
 
-        entry_price_snap = pos.entry_price 
-L
+        entry_price_snap = pos.entry_price
+
         pnl_data = self.risk.close_position(pair, price)
         if not pnl_data:
             return
-
         self._save_positions()
 
         trade_record = {
@@ -858,6 +838,7 @@ L
 
 
     def _graceful_shutdown(self) -> None:
+
         logger.info("[BOT] Graceful shutdown dimulai...")
 
         if self.cmd_thread and self.cmd_thread.is_alive():
