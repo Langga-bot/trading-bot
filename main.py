@@ -1,3 +1,17 @@
+"""
+main.py — Runner Utama Bot Trading Indodax
+===========================================
+Titik masuk utama bot. Menjalankan loop trading 24/7.
+Telegram command handler berjalan otomatis sebagai thread terpisah.
+
+Cara jalankan:
+  python main.py           -> Live trading + Telegram commands
+  python main.py --dry     -> Dry run (tidak eksekusi order)
+  python main.py --backtest -> Jalankan backtesting
+  python main.py --once    -> Jalankan satu iterasi saja
+  python main.py --no-cmd  -> Tanpa Telegram command handler
+"""
+
 import sys
 import time
 import signal
@@ -9,9 +23,6 @@ import json
 import threading
 import requests
 from datetime import datetime, time as dt_time
-from dotenv import load_dotenv
-
-load_dotenv()
 
 # Setup logging sebelum import modul lain
 def setup_logging(level: str = "INFO") -> None:
