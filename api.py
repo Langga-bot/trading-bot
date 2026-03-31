@@ -37,6 +37,7 @@ class IndodaxAPI:
         self.max_retries = BOT_CONFIG["max_retries"]
         self.retry_delay = BOT_CONFIG["retry_delay"]
 
+        # Session untuk requests langsung
         self.session = requests.Session()
         self.session.headers.update({
             "Content-Type":  "application/x-www-form-urlencoded",
@@ -54,6 +55,7 @@ class IndodaxAPI:
         # ccxt instance
         self._ccxt = None
         self._ticker_cache: dict = {}
+        self._ohlcv_cache:  dict = {} 
         if _CCXT_AVAILABLE:
             try:
                 self._ccxt = ccxt.indodax({
@@ -122,6 +124,7 @@ class IndodaxAPI:
 
 
     def get_ticker(self, pair: str) -> dict:
+
         cached = self._ticker_cache.get(pair)
         if cached:
             return cached
@@ -166,6 +169,7 @@ class IndodaxAPI:
         except Exception as e:
             logger.debug(f"[API] summaries error: {e}")
 
+        # ── Strategi 2: ccxt fetch_tickers (batch, tapi lebih berat) ────────
         if self._ccxt:
             try:
                 symbols  = [self._pair_to_symbol(p) for p in pairs]
@@ -264,24 +268,31 @@ class IndodaxAPI:
             return []
 
     def get_ohlcv(self, pair: str, tf: str = "5", limit: int = 100) -> List[dict]:
-        # 1. ccxt
+        cache_key = f"{pair}_{tf}"
+        if cache_key in self._ohlcv_cache:
+            return self._ohlcv_cache[cache_key]
+
+        result = []
+
         if self._ccxt:
-            r = self._get_ohlcv_ccxt(pair, tf, limit)
-            if r:
-                return r
+            result = self._get_ohlcv_ccxt(pair, tf, limit)
 
-        # 2. TradingView endpoint Indodax
-        r = self._get_ohlcv_tradingview(pair, tf, limit)
-        if r:
-            return r
+        if not result:
+            result = self._get_ohlcv_tradingview(pair, tf, limit)
 
-        # 3. Synthetic dari trade history
-        r = self._build_ohlcv_from_trades(pair, int(tf), limit)
-        if r:
-            return r
+        if not result:
+            result = self._build_ohlcv_from_trades(pair, int(tf), limit)
 
-        # 4. Fallback ticker
-        return self._build_ohlcv_from_ticker(pair, limit)
+        if not result:
+            result = self._build_ohlcv_from_ticker(pair, limit)
+
+        if result:
+            self._ohlcv_cache[cache_key] = result
+
+        return result
+
+    def clear_ohlcv_cache(self):
+        self._ohlcv_cache = {}
 
     def _get_ohlcv_ccxt(self, pair: str, tf: str, limit: int) -> List[dict]:
         try:
@@ -289,6 +300,7 @@ class IndodaxAPI:
             tf_ccxt = tf_map.get(str(tf), "1m")
             symbol  = self._pair_to_symbol(pair)
 
+            self._ccxt.options["fetchOHLCVLimit"] = limit
             raw = self._ccxt.fetch_ohlcv(symbol, timeframe=tf_ccxt, limit=limit)
 
             if (not raw or len(raw) < 30) and tf_ccxt != "1m":
@@ -297,7 +309,8 @@ class IndodaxAPI:
                     raw_1m = self._ccxt.fetch_ohlcv(symbol, timeframe="1m", limit=limit)
                     if raw_1m and len(raw_1m) > len(raw or []):
                         raw = raw_1m
-                except Exception: pass
+                except Exception:
+                    pass
 
             if raw and len(raw) >= 10:
                 result = [
@@ -314,12 +327,31 @@ class IndodaxAPI:
                 if result:
                     logger.info(f"[API] OHLCV ccxt OK: {len(result)} candles ({pair})")
                     return result
+            elif raw is not None:
+                logger.debug(f"[API] OHLCV ccxt terlalu sedikit: {len(raw)} candles ({pair})")
         except Exception as e:
-            if "429" in str(e):
-                logger.warning(f"[API] OHLCV 429 rate limit untuk {pair}, tunggu 10s...")
+            err = str(e)
+            if "429" in err:
+                logger.warning(f"[API] OHLCV rate limit {pair}, tunggu 10s...")
                 time.sleep(10)
+            elif "400" in err or "invalid" in err.lower():
+                logger.debug(f"[API] OHLCV {tf_ccxt} tidak support {pair}, coba 1m")
+                try:
+                    raw = self._ccxt.fetch_ohlcv(symbol, timeframe="1m", limit=limit)
+                    if raw and len(raw) >= 10:
+                        result = [
+                            {"timestamp": int(c[0]/1000), "open": float(c[1] or 0),
+                             "high": float(c[2] or 0), "low": float(c[3] or 0),
+                             "close": float(c[4] or 0), "volume": float(c[5] or 0)}
+                            for c in raw if c[4] is not None
+                        ]
+                        if result:
+                            logger.info(f"[API] OHLCV ccxt 1m OK: {len(result)} candles ({pair})")
+                            return result
+                except Exception:
+                    pass
             else:
-                logger.debug(f"[API] ccxt OHLCV {pair}: {e}")
+                logger.warning(f"[API] OHLCV ccxt {pair}: {err[:100]}")
         return []
 
     def _get_ohlcv_tradingview(self, pair: str, tf: str, limit: int) -> List[dict]:
@@ -425,8 +457,8 @@ class IndodaxAPI:
             logger.error(f"[API] _build_ohlcv_from_ticker {pair}: {e}")
             return []
 
-
     def get_balance(self) -> dict:
+        """Cek saldo akun."""
         if self._ccxt:
             try:
                 bal = self._ccxt.fetch_balance()
