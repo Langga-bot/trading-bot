@@ -46,13 +46,13 @@ STRATEGY_CONFIG = {
 }
 
 RISK_CONFIG = {
-    "stop_loss_pct": 0.02,
+    "stop_loss_pct": 0.025,
     "take_profit_pct": 0.03,
     "trailing_stop_pct": 0.015,
     "max_daily_loss_idr": 500_000,
     "max_trades_per_day": 20,
-    "trade_size_pct": 0.15,
-    "min_order_idr": 15_000,
+    "trade_size_pct": 0.20,
+    "min_order_idr": 10_000,
 }
 
 BOT_CONFIG = {
