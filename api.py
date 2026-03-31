@@ -15,6 +15,7 @@ import hmac
 import time
 import logging
 import random
+import threading
 import requests
 from urllib.parse import urlencode
 from typing import Optional, List, Tuple
@@ -67,10 +68,14 @@ class IndodaxAPI:
             "Referer":       "https://indodax.com/",
         })
 
+        # Thread safety untuk private API (nonce harus selalu unik & naik)
+        self._nonce_lock  = threading.Lock()
+        self._last_nonce  = 0
+
         # ccxt instance
         self._ccxt = None
-        self._ticker_cache: dict = {}   # cache hasil fetch_all_tickers per iterasi
-        self._ohlcv_cache:  dict = {}   # cache OHLCV per iterasi
+        self._ticker_cache: dict = {}
+        self._ohlcv_cache:  dict = {}
         if _CCXT_AVAILABLE:
             try:
                 self._ccxt = ccxt.indodax({
@@ -91,7 +96,15 @@ class IndodaxAPI:
         return f"{parts[0]}/{parts[1]}"
 
     def _sign(self, params: dict) -> Tuple[str, str]:
-        params["nonce"] = int(time.time() * 1000)
+        """Generate HMAC-SHA512 signature. Thread-safe via _nonce_lock."""
+        with self._nonce_lock:
+            # Pastikan nonce selalu naik — tidak ada dua request dengan nonce sama
+            nonce = int(time.time() * 1000)
+            if nonce <= self._last_nonce:
+                nonce = self._last_nonce + 1
+            self._last_nonce = nonce
+            params["nonce"] = nonce
+
         body = urlencode(params)
         sig  = hmac.new(self.secret_key, body.encode(), hashlib.sha512).hexdigest()
         return body, sig
