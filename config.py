@@ -21,6 +21,15 @@ TRADING_PAIRS: List[str] = [
     "xaut_idr",
     "gxc_idr",
     "moonpig_idr",
+    "sto_idr",
+    "br_idr",
+    "ont_idr",
+    "fartcoin_idr",
+    "hype_idr",
+    "paxg_idr",
+    "myx_idr",
+    "trx_idr",
+    "jellyjelly_idr",
 ]
 
 STRATEGY_CONFIG = {
