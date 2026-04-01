@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass, field
 from typing import List, Dict
-──
+
 API_KEY    = os.getenv("INDODAX_API_KEY", "YOUR_API_KEY_HERE")
 SECRET_KEY = os.getenv("INDODAX_SECRET_KEY", "YOUR_SECRET_KEY_HERE")
 
