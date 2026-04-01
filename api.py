@@ -3,6 +3,7 @@ import hmac
 import time
 import logging
 import random
+import threading
 import requests
 from urllib.parse import urlencode
 from typing import Optional, List, Tuple
@@ -31,6 +32,7 @@ class IndodaxAPIError(Exception):
 
 
 class IndodaxAPI:
+
     def __init__(self):
         self.api_key     = API_KEY
         self.secret_key  = SECRET_KEY.encode()
@@ -51,9 +53,12 @@ class IndodaxAPI:
             "Referer":       "https://indodax.com/",
         })
 
-        # ccxt instance
+        self._nonce_lock  = threading.Lock()
+        self._last_nonce  = 0
+
         self._ccxt = None
         self._ticker_cache: dict = {}
+        self._ohlcv_cache:  dict = {}
         if _CCXT_AVAILABLE:
             try:
                 self._ccxt = ccxt.indodax({
@@ -72,7 +77,13 @@ class IndodaxAPI:
         return f"{parts[0]}/{parts[1]}"
 
     def _sign(self, params: dict) -> Tuple[str, str]:
-        params["nonce"] = int(time.time() * 1000)
+        with self._nonce_lock:
+            nonce = int(time.time() * 1000)
+            if nonce <= self._last_nonce:
+                nonce = self._last_nonce + 1
+            self._last_nonce = nonce
+            params["nonce"] = nonce
+
         body = urlencode(params)
         sig  = hmac.new(self.secret_key, body.encode(), hashlib.sha512).hexdigest()
         return body, sig
@@ -264,24 +275,31 @@ class IndodaxAPI:
             return []
 
     def get_ohlcv(self, pair: str, tf: str = "5", limit: int = 100) -> List[dict]:
-        # 1. ccxt
+        cache_key = f"{pair}_{tf}"
+        if cache_key in self._ohlcv_cache:
+            return self._ohlcv_cache[cache_key]
+
+        result = []
+
         if self._ccxt:
-            r = self._get_ohlcv_ccxt(pair, tf, limit)
-            if r:
-                return r
+            result = self._get_ohlcv_ccxt(pair, tf, limit)
 
-        # 2. TradingView endpoint Indodax
-        r = self._get_ohlcv_tradingview(pair, tf, limit)
-        if r:
-            return r
+        if not result:
+            result = self._get_ohlcv_tradingview(pair, tf, limit)
 
-        # 3. Synthetic dari trade history
-        r = self._build_ohlcv_from_trades(pair, int(tf), limit)
-        if r:
-            return r
+        if not result:
+            result = self._build_ohlcv_from_trades(pair, int(tf), limit)
 
-        # 4. Fallback ticker
-        return self._build_ohlcv_from_ticker(pair, limit)
+        if not result:
+            result = self._build_ohlcv_from_ticker(pair, limit)
+
+        if result:
+            self._ohlcv_cache[cache_key] = result
+
+        return result
+
+    def clear_ohlcv_cache(self):
+        self._ohlcv_cache = {}
 
     def _get_ohlcv_ccxt(self, pair: str, tf: str, limit: int) -> List[dict]:
         try:
@@ -289,6 +307,7 @@ class IndodaxAPI:
             tf_ccxt = tf_map.get(str(tf), "1m")
             symbol  = self._pair_to_symbol(pair)
 
+            self._ccxt.options["fetchOHLCVLimit"] = limit
             raw = self._ccxt.fetch_ohlcv(symbol, timeframe=tf_ccxt, limit=limit)
 
             if (not raw or len(raw) < 30) and tf_ccxt != "1m":
@@ -297,7 +316,8 @@ class IndodaxAPI:
                     raw_1m = self._ccxt.fetch_ohlcv(symbol, timeframe="1m", limit=limit)
                     if raw_1m and len(raw_1m) > len(raw or []):
                         raw = raw_1m
-                except Exception: pass
+                except Exception:
+                    pass
 
             if raw and len(raw) >= 10:
                 result = [
@@ -314,12 +334,32 @@ class IndodaxAPI:
                 if result:
                     logger.info(f"[API] OHLCV ccxt OK: {len(result)} candles ({pair})")
                     return result
+            elif raw is not None:
+                logger.debug(f"[API] OHLCV ccxt terlalu sedikit: {len(raw)} candles ({pair})")
         except Exception as e:
-            if "429" in str(e):
-                logger.warning(f"[API] OHLCV 429 rate limit untuk {pair}, tunggu 10s...")
+            err = str(e)
+            if "429" in err:
+                logger.warning(f"[API] OHLCV rate limit {pair}, tunggu 10s...")
                 time.sleep(10)
+            elif "400" in err or "invalid" in err.lower():
+
+                logger.debug(f"[API] OHLCV {tf_ccxt} tidak support {pair}, coba 1m")
+                try:
+                    raw = self._ccxt.fetch_ohlcv(symbol, timeframe="1m", limit=limit)
+                    if raw and len(raw) >= 10:
+                        result = [
+                            {"timestamp": int(c[0]/1000), "open": float(c[1] or 0),
+                             "high": float(c[2] or 0), "low": float(c[3] or 0),
+                             "close": float(c[4] or 0), "volume": float(c[5] or 0)}
+                            for c in raw if c[4] is not None
+                        ]
+                        if result:
+                            logger.info(f"[API] OHLCV ccxt 1m OK: {len(result)} candles ({pair})")
+                            return result
+                except Exception:
+                    pass
             else:
-                logger.debug(f"[API] ccxt OHLCV {pair}: {e}")
+                logger.warning(f"[API] OHLCV ccxt {pair}: {err[:100]}")
         return []
 
     def _get_ohlcv_tradingview(self, pair: str, tf: str, limit: int) -> List[dict]:
@@ -427,6 +467,7 @@ class IndodaxAPI:
 
 
     def get_balance(self) -> dict:
+        """Cek saldo akun."""
         if self._ccxt:
             try:
                 bal = self._ccxt.fetch_balance()
@@ -473,6 +514,7 @@ class IndodaxAPI:
             return []
 
     def place_buy_order(self, pair: str, price: float, amount_idr: float) -> dict:
+        """Eksekusi BUY limit order."""
         logger.info(f"[ORDER] BUY {pair} price={price:,.0f} IDR={amount_idr:,.0f}")
         return self._private_post({
             "method": "trade",
@@ -483,6 +525,7 @@ class IndodaxAPI:
         })
 
     def place_sell_order(self, pair: str, price: float, coin_amount: float) -> dict:
+        """Eksekusi SELL limit order."""
         coin = pair.replace("_idr", "")
         logger.info(f"[ORDER] SELL {pair} price={price:,.0f} amount={coin_amount}")
         return self._private_post({
