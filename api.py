@@ -1,24 +1,14 @@
-"""
-api.py -- Wrapper Indodax REST API
-====================================
-Strategi koneksi berlapis:
-  1. ccxt library  -- paling reliable, sudah handle Indodax auth & OHLCV
-  2. TradingView endpoint Indodax
-  3. Trade history -> synthetic candles
-  4. Ticker-based  -- fallback akhir agar bot tidak crash
-
-Private API (trade/balance) tetap via HMAC-SHA512 langsung.
-"""
-
 import hashlib
 import hmac
 import time
 import logging
 import random
-import threading
 import requests
 from urllib.parse import urlencode
 from typing import Optional, List, Tuple
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from config import (
     API_KEY, SECRET_KEY,
@@ -28,7 +18,6 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
-# Coba import ccxt
 try:
     import ccxt
     _CCXT_AVAILABLE = True
@@ -42,18 +31,12 @@ class IndodaxAPIError(Exception):
 
 
 class IndodaxAPI:
-    """
-    Client Indodax REST API dengan 4 lapis fallback untuk OHLCV.
-    Urutan: ccxt -> TradingView -> Trade history -> Ticker synthetic
-    """
-
     def __init__(self):
         self.api_key     = API_KEY
         self.secret_key  = SECRET_KEY.encode()
         self.max_retries = BOT_CONFIG["max_retries"]
         self.retry_delay = BOT_CONFIG["retry_delay"]
 
-        # Session untuk requests langsung
         self.session = requests.Session()
         self.session.headers.update({
             "Content-Type":  "application/x-www-form-urlencoded",
@@ -68,14 +51,9 @@ class IndodaxAPI:
             "Referer":       "https://indodax.com/",
         })
 
-        # Thread safety untuk private API (nonce harus selalu unik & naik)
-        self._nonce_lock  = threading.Lock()
-        self._last_nonce  = 0
-
         # ccxt instance
         self._ccxt = None
         self._ticker_cache: dict = {}
-        self._ohlcv_cache:  dict = {}
         if _CCXT_AVAILABLE:
             try:
                 self._ccxt = ccxt.indodax({
@@ -87,36 +65,24 @@ class IndodaxAPI:
             except Exception as e:
                 logger.warning(f"[API] ccxt init error: {e}")
 
-    # ── Helpers ──────────────────────────────────────────────────────────────
 
     @staticmethod
     def _pair_to_symbol(pair: str) -> str:
-        """btc_idr -> BTC/IDR"""
         parts = pair.upper().split("_")
         return f"{parts[0]}/{parts[1]}"
 
     def _sign(self, params: dict) -> Tuple[str, str]:
-        """Generate HMAC-SHA512 signature. Thread-safe via _nonce_lock."""
-        with self._nonce_lock:
-            # Pastikan nonce selalu naik — tidak ada dua request dengan nonce sama
-            nonce = int(time.time() * 1000)
-            if nonce <= self._last_nonce:
-                nonce = self._last_nonce + 1
-            self._last_nonce = nonce
-            params["nonce"] = nonce
-
+        params["nonce"] = int(time.time() * 1000)
         body = urlencode(params)
         sig  = hmac.new(self.secret_key, body.encode(), hashlib.sha512).hexdigest()
         return body, sig
 
     def _public_get(self, endpoint: str, params: dict = None) -> dict:
-        """GET ke public API. Skip retry langsung pada 403."""
         url = f"{INDODAX_PUBLIC_URL}/{endpoint}"
         for attempt in range(self.max_retries):
             try:
                 r = self.session.get(url, params=params, timeout=8)
                 if r.status_code == 403:
-                    # 403 tidak akan berubah dengan retry — langsung skip
                     raise IndodaxAPIError(f"403 Forbidden: {endpoint}")
                 r.raise_for_status()
                 return r.json()
@@ -125,7 +91,7 @@ class IndodaxAPI:
             except Exception as e:
                 logger.debug(f"[API] HTTP GET attempt {attempt+1}: {e}")
                 if attempt < self.max_retries - 1:
-                    time.sleep(1)   # jeda singkat (bukan 5s) untuk non-403 error
+                    time.sleep(1)
         raise IndodaxAPIError(f"Failed {self.max_retries} retries: {endpoint}")
 
     def _private_post(self, params: dict) -> dict:
@@ -154,29 +120,17 @@ class IndodaxAPI:
                     time.sleep(self.retry_delay)
         raise IndodaxAPIError("Private API failed")
 
-    # ── Public API ───────────────────────────────────────────────────────────
 
     def get_ticker(self, pair: str) -> dict:
-        """
-        Ambil ticker satu pair dari cache (diisi fetch_all_tickers).
-        Jika cache kosong, fetch langsung via summaries.
-        """
         cached = self._ticker_cache.get(pair)
         if cached:
             return cached
-        # Cache kosong — fetch semua sekaligus
         self.fetch_all_tickers([pair])
         return self._ticker_cache.get(pair, {})
 
     def fetch_all_tickers(self, pairs: list) -> dict:
-        """
-        Fetch semua harga dalam SATU request via endpoint summaries Indodax.
-        Endpoint ini jauh lebih ringan dari /api/pairs dan jarang kena rate limit.
-        Fallback: ccxt fetch_tickers jika summaries gagal.
-        """
         self._ticker_cache = {}
 
-        # ── Strategi 1: Summaries endpoint (1 request, semua pair) ──────────
         try:
             url = f"{INDODAX_BASE_URL}/api/summaries"
             r   = self.session.get(url, timeout=10)
@@ -190,7 +144,6 @@ class IndodaxAPI:
                 tickers = data.get("tickers", data)
                 found = []
                 for pair in pairs:
-                    # summaries pakai key tanpa underscore, misal "btcidr"
                     key = pair.replace("_", "")
                     raw = tickers.get(key) or tickers.get(pair)
                     if raw:
@@ -213,7 +166,6 @@ class IndodaxAPI:
         except Exception as e:
             logger.debug(f"[API] summaries error: {e}")
 
-        # ── Strategi 2: ccxt fetch_tickers (batch, tapi lebih berat) ────────
         if self._ccxt:
             try:
                 symbols  = [self._pair_to_symbol(p) for p in pairs]
@@ -239,13 +191,12 @@ class IndodaxAPI:
                 else:
                     logger.warning(f"[API] ccxt fetch_tickers: {e}")
 
-        # ── Strategi 3: ccxt satu per satu dengan jeda ──────────────────────
         if self._ccxt:
             for pair in pairs:
                 try:
                     t = self._ccxt.fetch_ticker(self._pair_to_symbol(pair))
                     self._ticker_cache[pair] = self._normalize_ticker(t)
-                    time.sleep(1.0)   # jeda 1s antar request untuk hindari 429
+                    time.sleep(1.0)
                 except Exception as e:
                     if "429" in str(e):
                         logger.warning(f"[API] 429 pada {pair}, tunggu 20s...")
@@ -276,7 +227,6 @@ class IndodaxAPI:
         }
 
     def get_depth(self, pair: str) -> dict:
-        """Ambil order book. Silent jika 403."""
         if self._ccxt:
             try:
                 ob = self._ccxt.fetch_order_book(self._pair_to_symbol(pair), limit=20)
@@ -292,7 +242,6 @@ class IndodaxAPI:
             return {}
 
     def get_trades(self, pair: str) -> List[dict]:
-        """Ambil riwayat trade terbaru (maks 1000 untuk candle yang cukup)."""
         if self._ccxt:
             try:
                 trades = self._ccxt.fetch_trades(
@@ -315,43 +264,24 @@ class IndodaxAPI:
             return []
 
     def get_ohlcv(self, pair: str, tf: str = "5", limit: int = 100) -> List[dict]:
-        """
-        Ambil OHLCV dengan 4 lapis fallback.
-        Hasil di-cache per iterasi untuk menghindari request berulang.
-        tf = timeframe dalam menit: "1","5","15","30","60","240"
-        """
-        # Cek cache (reset tiap iterasi lewat clear_ohlcv_cache)
-        cache_key = f"{pair}_{tf}"
-        if cache_key in self._ohlcv_cache:
-            return self._ohlcv_cache[cache_key]
-
-        result = []
-
         # 1. ccxt
         if self._ccxt:
-            result = self._get_ohlcv_ccxt(pair, tf, limit)
+            r = self._get_ohlcv_ccxt(pair, tf, limit)
+            if r:
+                return r
 
         # 2. TradingView endpoint Indodax
-        if not result:
-            result = self._get_ohlcv_tradingview(pair, tf, limit)
+        r = self._get_ohlcv_tradingview(pair, tf, limit)
+        if r:
+            return r
 
         # 3. Synthetic dari trade history
-        if not result:
-            result = self._build_ohlcv_from_trades(pair, int(tf), limit)
+        r = self._build_ohlcv_from_trades(pair, int(tf), limit)
+        if r:
+            return r
 
-        # 4. Fallback ticker (sinyal tidak reliable)
-        if not result:
-            result = self._build_ohlcv_from_ticker(pair, limit)
-
-        # Simpan ke cache
-        if result:
-            self._ohlcv_cache[cache_key] = result
-
-        return result
-
-    def clear_ohlcv_cache(self):
-        """Reset cache OHLCV di awal setiap iterasi."""
-        self._ohlcv_cache = {}
+        # 4. Fallback ticker
+        return self._build_ohlcv_from_ticker(pair, limit)
 
     def _get_ohlcv_ccxt(self, pair: str, tf: str, limit: int) -> List[dict]:
         try:
@@ -359,8 +289,6 @@ class IndodaxAPI:
             tf_ccxt = tf_map.get(str(tf), "1m")
             symbol  = self._pair_to_symbol(pair)
 
-            # Set timeout eksplisit di ccxt options
-            self._ccxt.options["fetchOHLCVLimit"] = limit
             raw = self._ccxt.fetch_ohlcv(symbol, timeframe=tf_ccxt, limit=limit)
 
             if (not raw or len(raw) < 30) and tf_ccxt != "1m":
@@ -369,8 +297,7 @@ class IndodaxAPI:
                     raw_1m = self._ccxt.fetch_ohlcv(symbol, timeframe="1m", limit=limit)
                     if raw_1m and len(raw_1m) > len(raw or []):
                         raw = raw_1m
-                except Exception:
-                    pass
+                except Exception: pass
 
             if raw and len(raw) >= 10:
                 result = [
@@ -387,32 +314,12 @@ class IndodaxAPI:
                 if result:
                     logger.info(f"[API] OHLCV ccxt OK: {len(result)} candles ({pair})")
                     return result
-            elif raw is not None:
-                logger.debug(f"[API] OHLCV ccxt terlalu sedikit: {len(raw)} candles ({pair})")
         except Exception as e:
-            err = str(e)
-            if "429" in err:
-                logger.warning(f"[API] OHLCV rate limit {pair}, tunggu 10s...")
+            if "429" in str(e):
+                logger.warning(f"[API] OHLCV 429 rate limit untuk {pair}, tunggu 10s...")
                 time.sleep(10)
-            elif "400" in err or "invalid" in err.lower():
-                # Timeframe tidak support — coba 1m
-                logger.debug(f"[API] OHLCV {tf_ccxt} tidak support {pair}, coba 1m")
-                try:
-                    raw = self._ccxt.fetch_ohlcv(symbol, timeframe="1m", limit=limit)
-                    if raw and len(raw) >= 10:
-                        result = [
-                            {"timestamp": int(c[0]/1000), "open": float(c[1] or 0),
-                             "high": float(c[2] or 0), "low": float(c[3] or 0),
-                             "close": float(c[4] or 0), "volume": float(c[5] or 0)}
-                            for c in raw if c[4] is not None
-                        ]
-                        if result:
-                            logger.info(f"[API] OHLCV ccxt 1m OK: {len(result)} candles ({pair})")
-                            return result
-                except Exception:
-                    pass
             else:
-                logger.warning(f"[API] OHLCV ccxt {pair}: {err[:100]}")
+                logger.debug(f"[API] ccxt OHLCV {pair}: {e}")
         return []
 
     def _get_ohlcv_tradingview(self, pair: str, tf: str, limit: int) -> List[dict]:
@@ -483,11 +390,6 @@ class IndodaxAPI:
         return []
 
     def _build_ohlcv_from_ticker(self, pair: str, limit: int = 100) -> List[dict]:
-        """
-        Fallback akhir: candle sintetis dari ticker.
-        Bot tetap jalan tapi TIDAK akan eksekusi trade
-        karena sinyal tidak reliable dari data sintetis.
-        """
         try:
             ticker = self.get_ticker(pair)
             price  = float(ticker.get("last", 0) or 0)
@@ -523,10 +425,8 @@ class IndodaxAPI:
             logger.error(f"[API] _build_ohlcv_from_ticker {pair}: {e}")
             return []
 
-    # ── Private API ──────────────────────────────────────────────────────────
 
     def get_balance(self) -> dict:
-        """Cek saldo akun."""
         if self._ccxt:
             try:
                 bal = self._ccxt.fetch_balance()
@@ -573,7 +473,6 @@ class IndodaxAPI:
             return []
 
     def place_buy_order(self, pair: str, price: float, amount_idr: float) -> dict:
-        """Eksekusi BUY limit order."""
         logger.info(f"[ORDER] BUY {pair} price={price:,.0f} IDR={amount_idr:,.0f}")
         return self._private_post({
             "method": "trade",
@@ -584,7 +483,6 @@ class IndodaxAPI:
         })
 
     def place_sell_order(self, pair: str, price: float, coin_amount: float) -> dict:
-        """Eksekusi SELL limit order."""
         coin = pair.replace("_idr", "")
         logger.info(f"[ORDER] SELL {pair} price={price:,.0f} amount={coin_amount}")
         return self._private_post({
@@ -630,10 +528,6 @@ class IndodaxAPI:
             return {}
 
     def test_connection(self) -> dict:
-        """
-        Test semua endpoint dan tampilkan status.
-        Jalankan: python -c "from api import IndodaxAPI; api=IndodaxAPI(); print(api.test_connection())"
-        """
         results = {}
         try:
             t = self.get_ticker("btc_idr")
