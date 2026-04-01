@@ -2,57 +2,55 @@ import logging
 import requests
 from datetime import datetime
 from typing import Optional
-from dotenv import load_dotenv
-
-load_dotenv()
 
 from config import TELEGRAM_CONFIG, BOT_CONFIG, RISK_CONFIG
 
 logger = logging.getLogger(__name__)
 
+# Emoji
 E = {
-    "buy":      "\U0001f7e2",
-    "sell":     "\U0001f534",
-    "profit":   "\U0001f4b0",
-    "loss":     "\U0001f4b8",
-    "fire":     "\U0001f525",
-    "rocket":   "\U0001f680",
-    "stop":     "\U0001f6d1",
-    "warn":     "\u26a0\ufe0f",
-    "alert":    "\U0001f6a8",
-    "chart":    "\U0001f4ca",
-    "up":       "\U0001f4c8",
-    "down":     "\U0001f4c9",
-    "clock":    "\U0001f55b",
-    "robot":    "\U0001f916",
-    "check":    "\u2705",
-    "cross":    "\u274c",
-    "diamond":  "\U0001f48e",
-    "coin":     "\U0001fa99",
-    "pin":      "\U0001f4cc",
-    "target":   "\U0001f3af",
-    "info":     "\u2139\ufe0f",
-    "shield":   "\U0001f6e1\ufe0f",
-    "trophy":   "\U0001f3c6",
-    "bar":      "\U0001f4ca",
-    "sun":      "\U0001f31e",
-    "moon":     "\U0001f319",
-    "eye":      "\U0001f441\ufe0f",
-    "key":      "\U0001f511",
-    "spark":    "\u2728",
-    "thunder":  "\u26a1",
-    "lock":     "\U0001f512",
+    "buy":      "\U0001f7e2",   # 🟢
+    "sell":     "\U0001f534",   # 🔴
+    "profit":   "\U0001f4b0",   # 💰
+    "loss":     "\U0001f4b8",   # 💸
+    "fire":     "\U0001f525",   # 🔥
+    "rocket":   "\U0001f680",   # 🚀
+    "stop":     "\U0001f6d1",   # 🛑
+    "warn":     "\u26a0\ufe0f", # ⚠️
+    "alert":    "\U0001f6a8",   # 🚨
+    "chart":    "\U0001f4ca",   # 📊
+    "up":       "\U0001f4c8",   # 📈
+    "down":     "\U0001f4c9",   # 📉
+    "clock":    "\U0001f55b",   # 🕛
+    "robot":    "\U0001f916",   # 🤖
+    "check":    "\u2705",       # ✅
+    "cross":    "\u274c",       # ❌
+    "diamond":  "\U0001f48e",   # 💎
+    "coin":     "\U0001fa99",   # 🪙
+    "pin":      "\U0001f4cc",   # 📌
+    "target":   "\U0001f3af",   # 🎯
+    "info":     "\u2139\ufe0f", # ℹ️
+    "shield":   "\U0001f6e1\ufe0f", # 🛡️
+    "trophy":   "\U0001f3c6",   # 🏆
+    "bar":      "\U0001f4ca",   # 📊
+    "sun":      "\U0001f31e",   # 🌞
+    "moon":     "\U0001f319",   # 🌙
+    "eye":      "\U0001f441\ufe0f", # 👁️
+    "key":      "\U0001f511",   # 🔑
+    "spark":    "\u2728",       # ✨
+    "thunder":  "\u26a1",       # ⚡
+    "lock":     "\U0001f512",   # 🔒
 }
 
-LINE  = "\u2500" * 22
-DLINE = "\u2550" * 22
+LINE  = "\u2500" * 22           # ──────────────────────
+DLINE = "\u2550" * 22           # ══════════════════════
 
 
 class TelegramNotifier:
 
     def __init__(self):
-        self.token   = TELEGRAM_CONFIG.get("bot_token", "")
-        self.chat_id = str(TELEGRAM_CONFIG.get("chat_id", ""))
+        self.token   = TELEGRAM_CONFIG.get("bot_token", "").strip()
+        self.chat_id = str(TELEGRAM_CONFIG.get("chat_id", "")).strip().strip('"').strip("'")
         self.dry_run = BOT_CONFIG.get("dry_run", False)
 
         PLACEHOLDER_TOKENS = {
@@ -64,8 +62,8 @@ class TelegramNotifier:
             and self.token not in PLACEHOLDER_TOKENS
             and ":" in self.token
             and len(self.token) > 25
-            and self.token.split(":")[0].isdigit()
-            and len(self.token.split(":")[1]) >= 30
+            and self.token.split(":")[0].strip().isdigit()
+            and len(self.token.split(":")[1].strip()) >= 30
         )
         PLACEHOLDER_CHATS = {"", "123456789", "YOUR_CHAT_ID"}
         chat_ok = (
@@ -95,29 +93,44 @@ class TelegramNotifier:
              disable_web_preview: bool = True) -> bool:
         if not self.enabled:
             return False
-        try:
-            r = requests.post(
-                f"{self.base_url}/sendMessage",
-                json={
-                    "chat_id":                  self.chat_id,
-                    "text":                     message,
-                    "parse_mode":               parse_mode,
-                    "disable_web_page_preview": disable_web_preview,
-                },
-                timeout=10,
-            )
-            data = r.json()
-            if r.status_code == 200 and data.get("ok"):
-                return True
-            code = data.get("error_code", r.status_code)
-            desc = data.get("description", "Unknown")
-            logger.warning(f"[NOTIF] Telegram gagal [{code}]: {desc}")
-            if code in (401, 404):
-                self.enabled = False
-            return False
-        except Exception as e:
-            logger.error(f"[NOTIF] Telegram error: {e}")
-            return False
+
+        payload = {
+            "chat_id":                  self.chat_id,
+            "text":                     message,
+            "parse_mode":               parse_mode,
+            "disable_web_page_preview": disable_web_preview,
+        }
+
+        for attempt in range(2):
+            try:
+                r = requests.post(
+                    f"{self.base_url}/sendMessage",
+                    json=payload,
+                    timeout=20,      
+                )
+                data = r.json()
+                if r.status_code == 200 and data.get("ok"):
+                    return True
+                code = data.get("error_code", r.status_code)
+                desc = data.get("description", "Unknown")
+                logger.warning(f"[NOTIF] Telegram gagal [{code}]: {desc}")
+                if code in (401, 404):
+                    self.enabled = False
+                    return False
+                return False
+            except requests.exceptions.ReadTimeout:
+                if attempt == 0:
+                    logger.debug("[NOTIF] Telegram timeout, retry...")
+                    continue
+                logger.warning("[NOTIF] Telegram timeout 2x - skip")
+                return False
+            except requests.exceptions.ConnectionError:
+                logger.warning("[NOTIF] Telegram koneksi gagal - skip")
+                return False
+            except Exception as e:
+                logger.warning(f"[NOTIF] Telegram error: {e}")
+                return False
+        return False
 
     def send_reply(self, message: str, reply_to_id: int, parse_mode: str = "HTML") -> bool:
         if not self.enabled:
@@ -157,9 +170,9 @@ class TelegramNotifier:
 
     @staticmethod
     def _rsi_indicator(rsi: float) -> str:
-        if rsi <= 30:   return f"\U0001f7e2 {rsi:.1f} (Oversold)"
-        if rsi >= 70:   return f"\U0001f534 {rsi:.1f} (Overbought)"
-        return f"\U0001f7e1 {rsi:.1f} (Normal)"
+        if rsi <= 30:   return f"\U0001f7e2 {rsi:.1f} (Oversold)"    # 🟢
+        if rsi >= 70:   return f"\U0001f534 {rsi:.1f} (Overbought)"  # 🔴
+        return f"\U0001f7e1 {rsi:.1f} (Normal)"                       # 🟡
 
 
     def notify_buy(
