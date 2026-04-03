@@ -54,10 +54,9 @@ from config import (
 from api             import IndodaxAPI, IndodaxAPIError
 from strategy        import StrategyEngine, Signal
 from risk_management import RiskManager
-from database        import Database, create_tabel
+from database        import Database
 from notifier        import TelegramNotifier, E, LINE, DLINE
 
-create_table()
 
 class TelegramCommandThread(threading.Thread):
 
