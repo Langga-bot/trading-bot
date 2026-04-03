@@ -7,9 +7,6 @@ import threading
 import requests
 from urllib.parse import urlencode
 from typing import Optional, List, Tuple
-from dotenv import load_dotenv
-
-load_dotenv()
 
 from config import (
     API_KEY, SECRET_KEY,
@@ -19,6 +16,7 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+# Coba import ccxt
 try:
     import ccxt
     _CCXT_AVAILABLE = True
@@ -39,6 +37,7 @@ class IndodaxAPI:
         self.max_retries = BOT_CONFIG["max_retries"]
         self.retry_delay = BOT_CONFIG["retry_delay"]
 
+        # Session untuk requests langsung
         self.session = requests.Session()
         self.session.headers.update({
             "Content-Type":  "application/x-www-form-urlencoded",
@@ -53,9 +52,11 @@ class IndodaxAPI:
             "Referer":       "https://indodax.com/",
         })
 
+        # Thread safety untuk private API (nonce harus selalu unik & naik)
         self._nonce_lock  = threading.Lock()
         self._last_nonce  = 0
 
+        # ccxt instance
         self._ccxt = None
         self._ticker_cache: dict = {}
         self._ohlcv_cache:  dict = {}
@@ -73,6 +74,7 @@ class IndodaxAPI:
 
     @staticmethod
     def _pair_to_symbol(pair: str) -> str:
+        """btc_idr -> BTC/IDR"""
         parts = pair.upper().split("_")
         return f"{parts[0]}/{parts[1]}"
 
@@ -136,8 +138,11 @@ class IndodaxAPI:
         cached = self._ticker_cache.get(pair)
         if cached:
             return cached
+        alt_key = pair.replace("_", "")
+        if alt_key in self._ticker_cache:
+            return self._ticker_cache[alt_key]
         self.fetch_all_tickers([pair])
-        return self._ticker_cache.get(pair, {})
+        return self._ticker_cache.get(pair) or self._ticker_cache.get(alt_key, {})
 
     def fetch_all_tickers(self, pairs: list) -> dict:
         self._ticker_cache = {}
@@ -151,52 +156,54 @@ class IndodaxAPI:
                 time.sleep(wait)
                 r = self.session.get(url, timeout=10)
             if r.status_code == 200:
-                data = r.json()
+                data    = r.json()
                 tickers = data.get("tickers", data)
-                found = []
-                for pair in pairs:
-                    key = pair.replace("_", "")
-                    raw = tickers.get(key) or tickers.get(pair)
-                    if raw:
-                        self._ticker_cache[pair] = {
-                            "last":    str(raw.get("last", 0) or 0),
-                            "high":    str(raw.get("high", 0) or 0),
-                            "low":     str(raw.get("low",  0) or 0),
-                            "buy":     str(raw.get("buy",  0) or 0),
-                            "sell":    str(raw.get("sell", 0) or 0),
-                            "vol_idr": str(raw.get("vol_idr", 0) or 0),
-                        }
-                        found.append(pair)
-                if found:
-                    summary = ", ".join(
-                        f"{p}={float(self._ticker_cache[p].get('last',0)):,.0f}"
-                        for p in found
-                    )
-                    logger.info(f"[API] Summaries OK: {summary}")
-                    return self._ticker_cache
+
+                for raw_key, raw in tickers.items():
+                    if not isinstance(raw, dict):
+                        continue
+                    ticker_data = {
+                        "last":    str(raw.get("last", 0) or 0),
+                        "high":    str(raw.get("high", 0) or 0),
+                        "low":     str(raw.get("low",  0) or 0),
+                        "buy":     str(raw.get("buy",  0) or 0),
+                        "sell":    str(raw.get("sell", 0) or 0),
+                        "vol_idr": str(raw.get("vol_idr", 0) or 0),
+                    }
+                    norm = self._normalize_pair_key(raw_key)
+                    self._ticker_cache[norm]    = ticker_data
+                    self._ticker_cache[raw_key] = ticker_data
+
+                if self._ticker_cache:
+                    found = [p for p in pairs if p in self._ticker_cache and
+                             float(self._ticker_cache[p].get("last", 0)) > 0]
+                    if found:
+                        summary = ", ".join(
+                            f"{p}={float(self._ticker_cache[p].get('last',0)):,.0f}"
+                            for p in found
+                        )
+                        logger.info(f"[API] Summaries OK: {summary}")
+                    return {p: self._ticker_cache[p] for p in pairs if p in self._ticker_cache}
         except Exception as e:
             logger.debug(f"[API] summaries error: {e}")
 
         if self._ccxt:
             try:
-                symbols  = [self._pair_to_symbol(p) for p in pairs]
-                tickers  = self._ccxt.fetch_tickers(symbols)
-                found    = []
+                symbols = [self._pair_to_symbol(p) for p in pairs]
+                tickers = self._ccxt.fetch_tickers(symbols)
                 for pair in pairs:
                     sym = self._pair_to_symbol(pair)
                     if sym in tickers:
                         self._ticker_cache[pair] = self._normalize_ticker(tickers[sym])
-                        found.append(pair)
-                if found:
+                if self._ticker_cache:
                     summary = ", ".join(
                         f"{p}={float(self._ticker_cache[p].get('last',0)):,.0f}"
-                        for p in found
+                        for p in pairs if p in self._ticker_cache
                     )
                     logger.info(f"[API] ccxt batch ticker OK: {summary}")
                     return self._ticker_cache
             except Exception as e:
-                err_str = str(e)
-                if "429" in err_str:
+                if "429" in str(e):
                     logger.warning("[API] ccxt 429 rate limit - tunggu 15s...")
                     time.sleep(15)
                 else:
@@ -216,15 +223,24 @@ class IndodaxAPI:
                         logger.warning(f"[API] ticker {pair}: {e}")
 
         if self._ticker_cache:
-            summary = ", ".join(
-                f"{p}={float(self._ticker_cache[p].get('last',0)):,.0f}"
-                for p in self._ticker_cache
-            )
-            logger.info(f"[API] Ticker fallback OK: {summary}")
+            found = [p for p in pairs if p in self._ticker_cache]
+            if found:
+                summary = ", ".join(
+                    f"{p}={float(self._ticker_cache[p].get('last',0)):,.0f}"
+                    for p in found
+                )
+                logger.info(f"[API] Ticker fallback OK: {summary}")
         else:
-            logger.error("[API] Semua metode ticker gagal! Cek koneksi / rate limit.")
+            logger.error("[API] Semua metode ticker gagal!")
 
         return self._ticker_cache
+
+    @staticmethod
+    def _normalize_pair_key(key: str) -> str:
+        key = key.lower().strip()
+        if "_" not in key and key.endswith("idr"):
+            return key[:-3] + "_idr"
+        return key
 
     @staticmethod
     def _normalize_ticker(t: dict) -> dict:
@@ -281,24 +297,30 @@ class IndodaxAPI:
 
         result = []
 
+        # 1. ccxt
         if self._ccxt:
             result = self._get_ohlcv_ccxt(pair, tf, limit)
 
+        # 2. TradingView endpoint Indodax
         if not result:
             result = self._get_ohlcv_tradingview(pair, tf, limit)
 
+        # 3. Synthetic dari trade history
         if not result:
             result = self._build_ohlcv_from_trades(pair, int(tf), limit)
 
+        # 4. Fallback ticker (sinyal tidak reliable)
         if not result:
             result = self._build_ohlcv_from_ticker(pair, limit)
 
+        # Simpan ke cache
         if result:
             self._ohlcv_cache[cache_key] = result
 
         return result
 
     def clear_ohlcv_cache(self):
+        """Reset cache OHLCV di awal setiap iterasi."""
         self._ohlcv_cache = {}
 
     def _get_ohlcv_ccxt(self, pair: str, tf: str, limit: int) -> List[dict]:
@@ -307,6 +329,7 @@ class IndodaxAPI:
             tf_ccxt = tf_map.get(str(tf), "1m")
             symbol  = self._pair_to_symbol(pair)
 
+            # Set timeout eksplisit di ccxt options
             self._ccxt.options["fetchOHLCVLimit"] = limit
             raw = self._ccxt.fetch_ohlcv(symbol, timeframe=tf_ccxt, limit=limit)
 
@@ -342,7 +365,6 @@ class IndodaxAPI:
                 logger.warning(f"[API] OHLCV rate limit {pair}, tunggu 10s...")
                 time.sleep(10)
             elif "400" in err or "invalid" in err.lower():
-
                 logger.debug(f"[API] OHLCV {tf_ccxt} tidak support {pair}, coba 1m")
                 try:
                     raw = self._ccxt.fetch_ohlcv(symbol, timeframe="1m", limit=limit)
