@@ -1,63 +1,141 @@
-import sqlite3
-import logging
 import os
+import logging
 from datetime import datetime, date
-from typing import List, Optional, Dict
+from typing import List, Optional
 from contextlib import contextmanager
 
 from config import DATABASE_CONFIG
 
 logger = logging.getLogger(__name__)
 
+PG_URL = os.getenv("DATABASE_URL", DATABASE_CONFIG.get("pg_url", ""))
+
+try:
+    import psycopg2
+    import psycopg2.extras
+    _PSYCOPG2_OK = bool(PG_URL)
+except ImportError:
+    _PSYCOPG2_OK = False
+
+USE_POSTGRES = _PSYCOPG2_OK and bool(PG_URL)
+
+if USE_POSTGRES:
+    logger.info("[DB] Mode: PostgreSQL (Railway/cloud)")
+else:
+    import sqlite3
+    logger.info("[DB] Mode: SQLite lokal")
+
 
 class Database:
 
     def __init__(self):
-        self.db_type = DATABASE_CONFIG["type"]
-        self.db_path = DATABASE_CONFIG["sqlite_path"]
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        if USE_POSTGRES:
+            self._pg_url = PG_URL.replace("postgres://", "postgresql://", 1)
+            self.db_type = "postgresql"
+        else:
+            self.db_type  = "sqlite"
+            self._db_path = DATABASE_CONFIG.get("sqlite_path", "data/trades.db")
+            os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
+
         self._init_tables()
+        logger.info(f"[DB] Database siap ({self.db_type})")
 
     @contextmanager
     def _get_conn(self):
-        conn = sqlite3.connect(self.db_path, timeout=10)
-        conn.row_factory = sqlite3.Row
-        try:
-            yield conn
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            logger.error(f"[DB] Transaction error: {e}")
-            raise
-        finally:
-            conn.close()
+        if USE_POSTGRES:
+            conn = psycopg2.connect(self._pg_url)
+            conn.autocommit = False
+            try:
+                yield conn
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"[DB] PG transaction error: {e}")
+                raise
+            finally:
+                conn.close()
+        else:
+            conn = sqlite3.connect(self._db_path, timeout=15)
+            conn.row_factory = sqlite3.Row
+            try:
+                yield conn
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"[DB] SQLite transaction error: {e}")
+                raise
+            finally:
+                conn.close()
+
+    def _execute(self, conn, sql: str, params=None):
+        if USE_POSTGRES:
+            sql = sql.replace("?", "%s")
+            sql = sql.replace("datetime('now')", "NOW()")
+            sql = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+            sql = sql.replace("AUTOINCREMENT", "")
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        else:
+            cur = conn.cursor()
+        cur.execute(sql, params or ())
+        return cur
+
+    def _fetchall(self, cur) -> List[dict]:
+        rows = cur.fetchall()
+        if USE_POSTGRES:
+            return [dict(r) for r in rows]
+        return [dict(r) for r in rows]
+
+    def _fetchone(self, cur) -> Optional[dict]:
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return dict(row)
 
     def _init_tables(self):
+        if USE_POSTGRES:
+            self._init_tables_pg()
+        else:
+            self._init_tables_sqlite()
+
+    def _init_tables_sqlite(self):
         with self._get_conn() as conn:
             conn.executescript("""
-                -- Riwayat semua trade
                 CREATE TABLE IF NOT EXISTS trades (
-                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                    pair          TEXT NOT NULL,
-                    trade_type    TEXT NOT NULL,       -- BUY / SELL
-                    entry_price   REAL,
-                    exit_price    REAL,
-                    coin_amount   REAL,
-                    idr_invested  REAL,
-                    idr_received  REAL,
-                    pnl_idr       REAL DEFAULT 0,
-                    pnl_pct       REAL DEFAULT 0,
-                    strategy      TEXT,
-                    reason        TEXT,
-                    duration_min  INTEGER DEFAULT 0,
-                    order_id      TEXT,
-                    dry_run       INTEGER DEFAULT 0,
-                    entry_time    TEXT,
-                    exit_time     TEXT,
-                    created_at    TEXT DEFAULT (datetime('now'))
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pair         TEXT NOT NULL,
+                    trade_type   TEXT NOT NULL,
+                    entry_price  REAL,
+                    exit_price   REAL,
+                    coin_amount  REAL,
+                    idr_invested REAL,
+                    idr_received REAL,
+                    pnl_idr      REAL DEFAULT 0,
+                    pnl_pct      REAL DEFAULT 0,
+                    strategy     TEXT,
+                    reason       TEXT,
+                    duration_min INTEGER DEFAULT 0,
+                    order_id     TEXT,
+                    dry_run      INTEGER DEFAULT 0,
+                    entry_time   TEXT,
+                    exit_time    TEXT,
+                    created_at   TEXT DEFAULT (datetime('now'))
                 );
 
-                -- Snapshot indikator per analisis
+                CREATE TABLE IF NOT EXISTS open_positions (
+                    pair                TEXT PRIMARY KEY,
+                    entry_price         REAL NOT NULL,
+                    coin_amount         REAL NOT NULL,
+                    idr_invested        REAL NOT NULL,
+                    slot_size           REAL DEFAULT 0,
+                    stop_loss           REAL NOT NULL,
+                    take_profit         REAL NOT NULL,
+                    trailing_stop_price REAL DEFAULT 0,
+                    highest_price       REAL DEFAULT 0,
+                    order_id            TEXT DEFAULT '',
+                    entry_time          TEXT,
+                    updated_at          TEXT DEFAULT (datetime('now'))
+                );
+
                 CREATE TABLE IF NOT EXISTS market_snapshots (
                     id            INTEGER PRIMARY KEY AUTOINCREMENT,
                     pair          TEXT NOT NULL,
@@ -76,193 +154,458 @@ class Database:
                     snapshot_time TEXT DEFAULT (datetime('now'))
                 );
 
-                -- Summary harian
                 CREATE TABLE IF NOT EXISTS daily_summary (
-                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                    trade_date      TEXT UNIQUE,
-                    total_trades    INTEGER DEFAULT 0,
-                    winning_trades  INTEGER DEFAULT 0,
-                    losing_trades   INTEGER DEFAULT 0,
-                    gross_profit    REAL DEFAULT 0,
-                    gross_loss      REAL DEFAULT 0,
-                    net_pnl         REAL DEFAULT 0,
-                    winrate         REAL DEFAULT 0,
-                    best_trade      REAL DEFAULT 0,
-                    worst_trade     REAL DEFAULT 0
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_date     TEXT UNIQUE,
+                    total_trades   INTEGER DEFAULT 0,
+                    winning_trades INTEGER DEFAULT 0,
+                    losing_trades  INTEGER DEFAULT 0,
+                    gross_profit   REAL DEFAULT 0,
+                    gross_loss     REAL DEFAULT 0,
+                    net_pnl        REAL DEFAULT 0,
+                    winrate        REAL DEFAULT 0,
+                    best_trade     REAL DEFAULT 0,
+                    worst_trade    REAL DEFAULT 0
                 );
 
-                -- Log error
                 CREATE TABLE IF NOT EXISTS error_log (
-                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                    level       TEXT,
-                    message     TEXT,
-                    context     TEXT,
-                    logged_at   TEXT DEFAULT (datetime('now'))
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    level      TEXT,
+                    message    TEXT,
+                    context    TEXT,
+                    logged_at  TEXT DEFAULT (datetime('now'))
                 );
 
-                -- Indeks untuk performa query
                 CREATE INDEX IF NOT EXISTS idx_trades_pair ON trades(pair);
                 CREATE INDEX IF NOT EXISTS idx_trades_date ON trades(created_at);
-                CREATE INDEX IF NOT EXISTS idx_snapshots_pair ON market_snapshots(pair);
             """)
-        logger.info(f"[DB] Database siap: {self.db_path}")
 
+    def _init_tables_pg(self):
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            stmts = [
+                """CREATE TABLE IF NOT EXISTS trades (
+                    id           SERIAL PRIMARY KEY,
+                    pair         TEXT NOT NULL,
+                    trade_type   TEXT NOT NULL,
+                    entry_price  DOUBLE PRECISION,
+                    exit_price   DOUBLE PRECISION,
+                    coin_amount  DOUBLE PRECISION,
+                    idr_invested DOUBLE PRECISION,
+                    idr_received DOUBLE PRECISION,
+                    pnl_idr      DOUBLE PRECISION DEFAULT 0,
+                    pnl_pct      DOUBLE PRECISION DEFAULT 0,
+                    strategy     TEXT,
+                    reason       TEXT,
+                    duration_min INTEGER DEFAULT 0,
+                    order_id     TEXT,
+                    dry_run      INTEGER DEFAULT 0,
+                    entry_time   TEXT,
+                    exit_time    TEXT,
+                    created_at   TIMESTAMP DEFAULT NOW()
+                )""",
+                """CREATE TABLE IF NOT EXISTS open_positions (
+                    pair                TEXT PRIMARY KEY,
+                    entry_price         DOUBLE PRECISION NOT NULL,
+                    coin_amount         DOUBLE PRECISION NOT NULL,
+                    idr_invested        DOUBLE PRECISION NOT NULL,
+                    slot_size           DOUBLE PRECISION DEFAULT 0,
+                    stop_loss           DOUBLE PRECISION NOT NULL,
+                    take_profit         DOUBLE PRECISION NOT NULL,
+                    trailing_stop_price DOUBLE PRECISION DEFAULT 0,
+                    highest_price       DOUBLE PRECISION DEFAULT 0,
+                    order_id            TEXT DEFAULT '',
+                    entry_time          TEXT,
+                    updated_at          TIMESTAMP DEFAULT NOW()
+                )""",
+                """CREATE TABLE IF NOT EXISTS market_snapshots (
+                    id            SERIAL PRIMARY KEY,
+                    pair          TEXT NOT NULL,
+                    price         DOUBLE PRECISION,
+                    ema_fast      DOUBLE PRECISION,
+                    ema_slow      DOUBLE PRECISION,
+                    rsi           DOUBLE PRECISION,
+                    macd_hist     DOUBLE PRECISION,
+                    bb_signal     TEXT,
+                    volume_spike  INTEGER,
+                    trend         TEXT,
+                    buy_score     INTEGER,
+                    sell_score    INTEGER,
+                    signal        TEXT,
+                    confidence    DOUBLE PRECISION,
+                    snapshot_time TIMESTAMP DEFAULT NOW()
+                )""",
+                """CREATE TABLE IF NOT EXISTS daily_summary (
+                    id             SERIAL PRIMARY KEY,
+                    trade_date     TEXT UNIQUE,
+                    total_trades   INTEGER DEFAULT 0,
+                    winning_trades INTEGER DEFAULT 0,
+                    losing_trades  INTEGER DEFAULT 0,
+                    gross_profit   DOUBLE PRECISION DEFAULT 0,
+                    gross_loss     DOUBLE PRECISION DEFAULT 0,
+                    net_pnl        DOUBLE PRECISION DEFAULT 0,
+                    winrate        DOUBLE PRECISION DEFAULT 0,
+                    best_trade     DOUBLE PRECISION DEFAULT 0,
+                    worst_trade    DOUBLE PRECISION DEFAULT 0
+                )""",
+                """CREATE TABLE IF NOT EXISTS error_log (
+                    id        SERIAL PRIMARY KEY,
+                    level     TEXT,
+                    message   TEXT,
+                    context   TEXT,
+                    logged_at TIMESTAMP DEFAULT NOW()
+                )""",
+                "CREATE INDEX IF NOT EXISTS idx_trades_pair ON trades(pair)",
+                "CREATE INDEX IF NOT EXISTS idx_trades_date ON trades(created_at)",
+            ]
+            for stmt in stmts:
+                cur.execute(stmt)
+
+    def _upsert_open_position_sql(self) -> str:
+        if USE_POSTGRES:
+            return """
+                INSERT INTO open_positions (
+                    pair, entry_price, coin_amount, idr_invested, slot_size,
+                    stop_loss, take_profit, trailing_stop_price, highest_price,
+                    order_id, entry_time, updated_at
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                ON CONFLICT (pair) DO UPDATE SET
+                    entry_price         = EXCLUDED.entry_price,
+                    coin_amount         = EXCLUDED.coin_amount,
+                    idr_invested        = EXCLUDED.idr_invested,
+                    slot_size           = EXCLUDED.slot_size,
+                    stop_loss           = EXCLUDED.stop_loss,
+                    take_profit         = EXCLUDED.take_profit,
+                    trailing_stop_price = EXCLUDED.trailing_stop_price,
+                    highest_price       = EXCLUDED.highest_price,
+                    order_id            = EXCLUDED.order_id,
+                    entry_time          = EXCLUDED.entry_time,
+                    updated_at          = NOW()
+            """
+        else:
+            return """
+                INSERT INTO open_positions (
+                    pair, entry_price, coin_amount, idr_invested, slot_size,
+                    stop_loss, take_profit, trailing_stop_price, highest_price,
+                    order_id, entry_time, updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+                ON CONFLICT(pair) DO UPDATE SET
+                    entry_price         = excluded.entry_price,
+                    coin_amount         = excluded.coin_amount,
+                    idr_invested        = excluded.idr_invested,
+                    slot_size           = excluded.slot_size,
+                    stop_loss           = excluded.stop_loss,
+                    take_profit         = excluded.take_profit,
+                    trailing_stop_price = excluded.trailing_stop_price,
+                    highest_price       = excluded.highest_price,
+                    order_id            = excluded.order_id,
+                    entry_time          = excluded.entry_time,
+                    updated_at          = datetime('now')
+            """
+
+    def save_open_position(self, pair: str, pos) -> None:
+        sql    = self._upsert_open_position_sql()
+        params = (
+            pair,
+            float(pos.entry_price),
+            float(pos.coin_amount),
+            float(pos.idr_invested),
+            float(getattr(pos, "slot_size", 0) or 0),
+            float(pos.stop_loss),
+            float(pos.take_profit),
+            float(pos.trailing_stop_price),
+            float(pos.highest_price),
+            str(pos.order_id or ""),
+            str(pos.entry_time),
+        )
+        try:
+            with self._get_conn() as conn:
+                cur = conn.cursor()
+                cur.execute(sql, params)
+        except Exception as e:
+            logger.error(f"[DB] save_open_position error: {e}")
+
+    def delete_open_position(self, pair: str) -> None:
+        try:
+            with self._get_conn() as conn:
+                cur = conn.cursor()
+                if USE_POSTGRES:
+                    cur.execute("DELETE FROM open_positions WHERE pair = %s", (pair,))
+                else:
+                    cur.execute("DELETE FROM open_positions WHERE pair = ?", (pair,))
+        except Exception as e:
+            logger.error(f"[DB] delete_open_position error: {e}")
+
+    def load_open_positions(self) -> List[dict]:
+        try:
+            with self._get_conn() as conn:
+                if USE_POSTGRES:
+                    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                    cur.execute("SELECT * FROM open_positions ORDER BY entry_time")
+                    return [dict(r) for r in cur.fetchall()]
+                else:
+                    cur = conn.execute("SELECT * FROM open_positions ORDER BY entry_time")
+                    return [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            logger.error(f"[DB] load_open_positions error: {e}")
+            return []
 
     def save_trade(self, trade: dict) -> int:
-        with self._get_conn() as conn:
-            cur = conn.execute("""
+        """Simpan record trade."""
+        if USE_POSTGRES:
+            sql = """
                 INSERT INTO trades (
                     pair, trade_type, entry_price, exit_price,
                     coin_amount, idr_invested, idr_received,
                     pnl_idr, pnl_pct, strategy, reason,
-                    duration_min, order_id, dry_run,
-                    entry_time, exit_time
-                ) VALUES (
-                    :pair, :trade_type, :entry_price, :exit_price,
-                    :coin_amount, :idr_invested, :idr_received,
-                    :pnl_idr, :pnl_pct, :strategy, :reason,
-                    :duration_min, :order_id, :dry_run,
-                    :entry_time, :exit_time
-                )
-            """, {
-                "pair":         trade.get("pair", ""),
-                "trade_type":   trade.get("trade_type", ""),
-                "entry_price":  trade.get("entry_price", 0),
-                "exit_price":   trade.get("exit_price", 0),
-                "coin_amount":  trade.get("coin_amount", 0),
-                "idr_invested": trade.get("idr_invested", 0),
-                "idr_received": trade.get("idr_received", 0),
-                "pnl_idr":      trade.get("pnl_idr", 0),
-                "pnl_pct":      trade.get("pnl_pct", 0),
-                "strategy":     trade.get("strategy", ""),
-                "reason":       trade.get("reason", ""),
-                "duration_min": trade.get("duration_min", 0),
-                "order_id":     trade.get("order_id", ""),
-                "dry_run":      1 if trade.get("dry_run") else 0,
-                "entry_time":   str(trade.get("entry_time", "")),
-                "exit_time":    str(trade.get("exit_time", "")),
-            })
-            trade_id = cur.lastrowid
+                    duration_min, order_id, dry_run, entry_time, exit_time
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id
+            """
+        else:
+            sql = """
+                INSERT INTO trades (
+                    pair, trade_type, entry_price, exit_price,
+                    coin_amount, idr_invested, idr_received,
+                    pnl_idr, pnl_pct, strategy, reason,
+                    duration_min, order_id, dry_run, entry_time, exit_time
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """
+        params = (
+            trade.get("pair", ""),
+            trade.get("trade_type", ""),
+            trade.get("entry_price", 0),
+            trade.get("exit_price", 0),
+            trade.get("coin_amount", 0),
+            trade.get("idr_invested", 0),
+            trade.get("idr_received", 0),
+            trade.get("pnl_idr", 0),
+            trade.get("pnl_pct", 0),
+            trade.get("strategy", ""),
+            trade.get("reason", ""),
+            trade.get("duration_min", 0),
+            trade.get("order_id", ""),
+            1 if trade.get("dry_run") else 0,
+            str(trade.get("entry_time", "")),
+            str(trade.get("exit_time", "")),
+        )
+        trade_id = 0
+        try:
+            with self._get_conn() as conn:
+                cur = conn.cursor()
+                cur.execute(sql, params)
+                if USE_POSTGRES:
+                    trade_id = cur.fetchone()[0]
+                else:
+                    trade_id = cur.lastrowid
+        except Exception as e:
+            logger.error(f"[DB] save_trade error: {e}")
         self._update_daily_summary()
         return trade_id
 
     def save_snapshot(self, pair: str, price: float, ind, decision) -> None:
         try:
+            if USE_POSTGRES:
+                sql = """INSERT INTO market_snapshots
+                    (pair,price,ema_fast,ema_slow,rsi,macd_hist,
+                     bb_signal,volume_spike,trend,buy_score,sell_score,signal,confidence)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
+            else:
+                sql = """INSERT INTO market_snapshots
+                    (pair,price,ema_fast,ema_slow,rsi,macd_hist,
+                     bb_signal,volume_spike,trend,buy_score,sell_score,signal,confidence)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"""
+            params = (
+                pair, price,
+                getattr(ind, "ema_fast", 0),
+                getattr(ind, "ema_slow", 0),
+                getattr(ind, "rsi", 0),
+                getattr(ind, "macd_hist", 0),
+                getattr(ind, "bb_signal", ""),
+                1 if getattr(ind, "volume_spike", False) else 0,
+                getattr(ind, "trend", ""),
+                getattr(ind, "buy_score", 0),
+                getattr(ind, "sell_score", 0),
+                decision.action.value if decision else "HOLD",
+                getattr(decision, "confidence", 0),
+            )
             with self._get_conn() as conn:
-                conn.execute("""
-                    INSERT INTO market_snapshots (
-                        pair, price, ema_fast, ema_slow, rsi, macd_hist,
-                        bb_signal, volume_spike, trend, buy_score, sell_score,
-                        signal, confidence
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    pair, price,
-                    getattr(ind, "ema_fast", 0),
-                    getattr(ind, "ema_slow", 0),
-                    getattr(ind, "rsi", 0),
-                    getattr(ind, "macd_hist", 0),
-                    getattr(ind, "bb_signal", ""),
-                    1 if getattr(ind, "volume_spike", False) else 0,
-                    getattr(ind, "trend", ""),
-                    getattr(ind, "buy_score", 0),
-                    getattr(ind, "sell_score", 0),
-                    decision.action.value if decision else "HOLD",
-                    getattr(decision, "confidence", 0),
-                ))
+                conn.cursor().execute(sql, params)
         except Exception as e:
-            logger.warning(f"[DB] save_snapshot error: {e}")
+            logger.debug(f"[DB] save_snapshot error: {e}")
 
     def log_error(self, level: str, message: str, context: str = "") -> None:
         try:
+            if USE_POSTGRES:
+                sql = "INSERT INTO error_log (level,message,context) VALUES (%s,%s,%s)"
+            else:
+                sql = "INSERT INTO error_log (level,message,context) VALUES (?,?,?)"
             with self._get_conn() as conn:
-                conn.execute(
-                    "INSERT INTO error_log (level, message, context) VALUES (?, ?, ?)",
-                    (level, message, context),
-                )
+                conn.cursor().execute(sql, (level, message, context))
         except Exception:
             pass
 
-
     def get_trade_history(self, pair: str = "", limit: int = 50) -> List[dict]:
-        with self._get_conn() as conn:
-            if pair:
-                rows = conn.execute(
-                    "SELECT * FROM trades WHERE pair=? ORDER BY created_at DESC LIMIT ?",
-                    (pair, limit),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM trades ORDER BY created_at DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
-        return [dict(r) for r in rows]
+        try:
+            with self._get_conn() as conn:
+                if USE_POSTGRES:
+                    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                    if pair:
+                        cur.execute(
+                            "SELECT * FROM trades WHERE pair=%s ORDER BY created_at DESC LIMIT %s",
+                            (pair, limit)
+                        )
+                    else:
+                        cur.execute(
+                            "SELECT * FROM trades ORDER BY created_at DESC LIMIT %s",
+                            (limit,)
+                        )
+                else:
+                    if pair:
+                        cur = conn.execute(
+                            "SELECT * FROM trades WHERE pair=? ORDER BY created_at DESC LIMIT ?",
+                            (pair, limit)
+                        )
+                    else:
+                        cur = conn.execute(
+                            "SELECT * FROM trades ORDER BY created_at DESC LIMIT ?",
+                            (limit,)
+                        )
+                return [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            logger.error(f"[DB] get_trade_history error: {e}")
+            return []
 
     def get_daily_stats(self, days: int = 7) -> List[dict]:
-        with self._get_conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM daily_summary ORDER BY trade_date DESC LIMIT ?",
-                (days,),
-            ).fetchall()
-        return [dict(r) for r in rows]
+        try:
+            with self._get_conn() as conn:
+                if USE_POSTGRES:
+                    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                    cur.execute(
+                        "SELECT * FROM daily_summary ORDER BY trade_date DESC LIMIT %s",
+                        (days,)
+                    )
+                else:
+                    cur = conn.execute(
+                        "SELECT * FROM daily_summary ORDER BY trade_date DESC LIMIT ?",
+                        (days,)
+                    )
+                return [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            logger.error(f"[DB] get_daily_stats error: {e}")
+            return []
 
     def get_overall_stats(self) -> dict:
-        with self._get_conn() as conn:
-            row = conn.execute("""
-                SELECT
-                    COUNT(*)                           AS total_trades,
-                    SUM(CASE WHEN pnl_idr > 0 THEN 1 ELSE 0 END) AS wins,
-                    SUM(CASE WHEN pnl_idr < 0 THEN 1 ELSE 0 END) AS losses,
-                    SUM(pnl_idr)                       AS net_pnl,
-                    AVG(pnl_pct)                       AS avg_pnl_pct,
-                    MAX(pnl_idr)                       AS best_trade,
-                    MIN(pnl_idr)                       AS worst_trade,
-                    AVG(duration_min)                  AS avg_duration_min
-                FROM trades
-                WHERE dry_run = 0
-            """).fetchone()
-        if row:
-            d = dict(row)
-            total = d["total_trades"] or 1
-            d["winrate"] = (d["wins"] or 0) / total * 100
-            return d
+        try:
+            with self._get_conn() as conn:
+                if USE_POSTGRES:
+                    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                    cur.execute("""
+                        SELECT
+                            COUNT(*) AS total_trades,
+                            SUM(CASE WHEN pnl_idr > 0 THEN 1 ELSE 0 END) AS wins,
+                            SUM(CASE WHEN pnl_idr < 0 THEN 1 ELSE 0 END) AS losses,
+                            SUM(pnl_idr) AS net_pnl,
+                            AVG(pnl_pct) AS avg_pnl_pct,
+                            MAX(pnl_idr) AS best_trade,
+                            MIN(pnl_idr) AS worst_trade,
+                            AVG(duration_min) AS avg_duration_min
+                        FROM trades WHERE dry_run = 0
+                    """)
+                else:
+                    cur = conn.execute("""
+                        SELECT
+                            COUNT(*) AS total_trades,
+                            SUM(CASE WHEN pnl_idr > 0 THEN 1 ELSE 0 END) AS wins,
+                            SUM(CASE WHEN pnl_idr < 0 THEN 1 ELSE 0 END) AS losses,
+                            SUM(pnl_idr) AS net_pnl,
+                            AVG(pnl_pct) AS avg_pnl_pct,
+                            MAX(pnl_idr) AS best_trade,
+                            MIN(pnl_idr) AS worst_trade,
+                            AVG(duration_min) AS avg_duration_min
+                        FROM trades WHERE dry_run = 0
+                    """)
+                row = cur.fetchone()
+            if row:
+                d = dict(row)
+                total = d.get("total_trades") or 1
+                d["winrate"] = (d.get("wins") or 0) / total * 100
+                return d
+        except Exception as e:
+            logger.error(f"[DB] get_overall_stats error: {e}")
         return {}
-
 
     def _update_daily_summary(self):
         today = date.today().isoformat()
-        with self._get_conn() as conn:
-            conn.execute("""
-                INSERT INTO daily_summary (trade_date) VALUES (?)
-                ON CONFLICT(trade_date) DO NOTHING
-            """, (today,))
+        try:
+            with self._get_conn() as conn:
+                cur = conn.cursor()
+                if USE_POSTGRES:
+                    cur.execute(
+                        "INSERT INTO daily_summary (trade_date) VALUES (%s) ON CONFLICT DO NOTHING",
+                        (today,)
+                    )
+                    cur.execute("""
+                        SELECT COUNT(*) AS total,
+                               SUM(CASE WHEN pnl_idr > 0 THEN 1 ELSE 0 END) AS wins,
+                               SUM(CASE WHEN pnl_idr < 0 THEN 1 ELSE 0 END) AS losses,
+                               SUM(CASE WHEN pnl_idr > 0 THEN pnl_idr ELSE 0 END) AS gp,
+                               SUM(CASE WHEN pnl_idr < 0 THEN pnl_idr ELSE 0 END) AS gl,
+                               SUM(pnl_idr) AS net,
+                               MAX(pnl_idr) AS best,
+                               MIN(pnl_idr) AS worst
+                        FROM trades WHERE DATE(created_at::timestamp) = %s
+                    """, (today,))
+                else:
+                    cur.execute(
+                        "INSERT INTO daily_summary (trade_date) VALUES (?) ON CONFLICT(trade_date) DO NOTHING",
+                        (today,)
+                    )
+                    cur.execute("""
+                        SELECT COUNT(*) AS total,
+                               SUM(CASE WHEN pnl_idr > 0 THEN 1 ELSE 0 END) AS wins,
+                               SUM(CASE WHEN pnl_idr < 0 THEN 1 ELSE 0 END) AS losses,
+                               SUM(CASE WHEN pnl_idr > 0 THEN pnl_idr ELSE 0 END) AS gp,
+                               SUM(CASE WHEN pnl_idr < 0 THEN pnl_idr ELSE 0 END) AS gl,
+                               SUM(pnl_idr) AS net,
+                               MAX(pnl_idr) AS best,
+                               MIN(pnl_idr) AS worst
+                        FROM trades WHERE DATE(created_at) = ?
+                    """, (today,))
 
-            row = conn.execute("""
-                SELECT
-                    COUNT(*)                                   AS total,
-                    SUM(CASE WHEN pnl_idr > 0 THEN 1 ELSE 0 END) AS wins,
-                    SUM(CASE WHEN pnl_idr < 0 THEN 1 ELSE 0 END) AS losses,
-                    SUM(CASE WHEN pnl_idr > 0 THEN pnl_idr ELSE 0 END) AS gp,
-                    SUM(CASE WHEN pnl_idr < 0 THEN pnl_idr ELSE 0 END) AS gl,
-                    SUM(pnl_idr) AS net,
-                    MAX(pnl_idr) AS best,
-                    MIN(pnl_idr) AS worst
-                FROM trades
-                WHERE DATE(created_at) = ?
-            """, (today,)).fetchone()
-
-            if row and row["total"]:
-                wins = row["wins"] or 0
-                total = row["total"] or 1
-                conn.execute("""
-                    UPDATE daily_summary
-                    SET total_trades=?, winning_trades=?, losing_trades=?,
-                        gross_profit=?, gross_loss=?, net_pnl=?,
-                        winrate=?, best_trade=?, worst_trade=?
-                    WHERE trade_date=?
-                """, (
-                    row["total"], wins, row["losses"] or 0,
-                    row["gp"] or 0, row["gl"] or 0, row["net"] or 0,
-                    wins / total * 100,
-                    row["best"] or 0, row["worst"] or 0,
-                    today,
-                ))
+                row = cur.fetchone()
+                if row:
+                    row = dict(row)
+                    if row.get("total"):
+                        wins  = row.get("wins") or 0
+                        total = row.get("total") or 1
+                        if USE_POSTGRES:
+                            cur.execute("""
+                                UPDATE daily_summary
+                                SET total_trades=%s, winning_trades=%s, losing_trades=%s,
+                                    gross_profit=%s, gross_loss=%s, net_pnl=%s,
+                                    winrate=%s, best_trade=%s, worst_trade=%s
+                                WHERE trade_date=%s
+                            """, (
+                                row["total"], wins, row.get("losses") or 0,
+                                row.get("gp") or 0, row.get("gl") or 0, row.get("net") or 0,
+                                wins / total * 100,
+                                row.get("best") or 0, row.get("worst") or 0,
+                                today,
+                            ))
+                        else:
+                            cur.execute("""
+                                UPDATE daily_summary
+                                SET total_trades=?, winning_trades=?, losing_trades=?,
+                                    gross_profit=?, gross_loss=?, net_pnl=?,
+                                    winrate=?, best_trade=?, worst_trade=?
+                                WHERE trade_date=?
+                            """, (
+                                row["total"], wins, row.get("losses") or 0,
+                                row.get("gp") or 0, row.get("gl") or 0, row.get("net") or 0,
+                                wins / total * 100,
+                                row.get("best") or 0, row.get("worst") or 0,
+                                today,
+                            ))
+        except Exception as e:
+            logger.debug(f"[DB] _update_daily_summary error: {e}")
