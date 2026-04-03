@@ -90,9 +90,9 @@ TELEGRAM_CONFIG = {
 }
 
 DATABASE_CONFIG = {
-    "type": "sqlite",               # "sqlite" atau "postgresql"
+    "type":        "postgresql" if os.getenv("DATABASE_URL") else "sqlite",
     "sqlite_path": "data/trades.db",
-    "pg_url": os.getenv("DATABASE_URL", ""),
+    "pg_url":      os.getenv("DATABASE_URL", ""),
 }
 
 LOG_CONFIG = {
