@@ -13,7 +13,30 @@ PG_URL = os.getenv("DATABASE_URL", DATABASE_CONFIG.get("pg_url", ""))
 try:
     import psycopg2
     import psycopg2.extras
+    import psycopg2.extensions
+
     _PSYCOPG2_OK = bool(PG_URL)
+
+    if _PSYCOPG2_OK:
+        try:
+            import numpy as np
+
+            def _adapt_numpy_float(val):
+                return psycopg2.extensions.AsIs(repr(float(val)))
+
+            def _adapt_numpy_int(val):
+                return psycopg2.extensions.AsIs(repr(int(val)))
+
+            def _adapt_numpy_bool(val):
+                return psycopg2.extensions.AsIs(repr(bool(val)))
+
+            psycopg2.extensions.register_adapter(np.float64,  _adapt_numpy_float)
+            psycopg2.extensions.register_adapter(np.float32,  _adapt_numpy_float)
+            psycopg2.extensions.register_adapter(np.int64,    _adapt_numpy_int)
+            psycopg2.extensions.register_adapter(np.int32,    _adapt_numpy_int)
+            psycopg2.extensions.register_adapter(np.bool_,    _adapt_numpy_bool)
+        except ImportError:
+            pass
 except ImportError:
     _PSYCOPG2_OK = False
 
@@ -27,6 +50,10 @@ else:
 
 
 class Database:
+    """
+    Database wrapper yang mendukung SQLite dan PostgreSQL.
+    Deteksi otomatis berdasarkan DATABASE_URL environment variable.
+    """
 
     def __init__(self):
         if USE_POSTGRES:
@@ -42,6 +69,7 @@ class Database:
 
     @contextmanager
     def _get_conn(self):
+        """Context manager koneksi — bekerja untuk SQLite dan PostgreSQL."""
         if USE_POSTGRES:
             conn = psycopg2.connect(self._pg_url)
             conn.autocommit = False
@@ -68,6 +96,7 @@ class Database:
                 conn.close()
 
     def _execute(self, conn, sql: str, params=None):
+        """Eksekusi SQL dengan konversi placeholder ? -> %s untuk PostgreSQL."""
         if USE_POSTGRES:
             sql = sql.replace("?", "%s")
             sql = sql.replace("datetime('now')", "NOW()")
@@ -92,6 +121,7 @@ class Database:
         return dict(row)
 
     def _init_tables(self):
+        """Buat semua tabel jika belum ada."""
         if USE_POSTGRES:
             self._init_tables_pg()
         else:
@@ -304,28 +334,30 @@ class Database:
             """
 
     def save_open_position(self, pair: str, pos) -> None:
-        sql    = self._upsert_open_position_sql()
+        """Simpan/update posisi terbuka — persistent di DB."""
+        f   = self._to_py
+        sql = self._upsert_open_position_sql()
         params = (
-            pair,
-            float(pos.entry_price),
-            float(pos.coin_amount),
-            float(pos.idr_invested),
-            float(getattr(pos, "slot_size", 0) or 0),
-            float(pos.stop_loss),
-            float(pos.take_profit),
-            float(pos.trailing_stop_price),
-            float(pos.highest_price),
+            str(pair),
+            f(pos.entry_price),
+            f(pos.coin_amount),
+            f(pos.idr_invested),
+            f(getattr(pos, "slot_size", 0) or 0),
+            f(pos.stop_loss),
+            f(pos.take_profit),
+            f(pos.trailing_stop_price),
+            f(pos.highest_price),
             str(pos.order_id or ""),
             str(pos.entry_time),
         )
         try:
             with self._get_conn() as conn:
-                cur = conn.cursor()
-                cur.execute(sql, params)
+                conn.cursor().execute(sql, params)
         except Exception as e:
             logger.error(f"[DB] save_open_position error: {e}")
 
     def delete_open_position(self, pair: str) -> None:
+        """Hapus posisi setelah ditutup."""
         try:
             with self._get_conn() as conn:
                 cur = conn.cursor()
@@ -337,6 +369,7 @@ class Database:
             logger.error(f"[DB] delete_open_position error: {e}")
 
     def load_open_positions(self) -> List[dict]:
+        """Load semua posisi terbuka — dipanggil saat bot start."""
         try:
             with self._get_conn() as conn:
                 if USE_POSTGRES:
@@ -351,7 +384,8 @@ class Database:
             return []
 
     def save_trade(self, trade: dict) -> int:
-        """Simpan record trade."""
+        """Simpan record trade — konversi semua nilai ke Python native types."""
+        f = self._to_py
         if USE_POSTGRES:
             sql = """
                 INSERT INTO trades (
@@ -372,19 +406,19 @@ class Database:
                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """
         params = (
-            trade.get("pair", ""),
-            trade.get("trade_type", ""),
-            trade.get("entry_price", 0),
-            trade.get("exit_price", 0),
-            trade.get("coin_amount", 0),
-            trade.get("idr_invested", 0),
-            trade.get("idr_received", 0),
-            trade.get("pnl_idr", 0),
-            trade.get("pnl_pct", 0),
-            trade.get("strategy", ""),
-            trade.get("reason", ""),
-            trade.get("duration_min", 0),
-            trade.get("order_id", ""),
+            str(trade.get("pair", "")),
+            str(trade.get("trade_type", "")),
+            f(trade.get("entry_price", 0)) or 0.0,
+            f(trade.get("exit_price", 0)) or 0.0,
+            f(trade.get("coin_amount", 0)) or 0.0,
+            f(trade.get("idr_invested", 0)) or 0.0,
+            f(trade.get("idr_received", 0)) or 0.0,
+            f(trade.get("pnl_idr", 0)) or 0.0,
+            f(trade.get("pnl_pct", 0)) or 0.0,
+            str(trade.get("strategy", "") or ""),
+            str(trade.get("reason", "") or ""),
+            int(f(trade.get("duration_min", 0)) or 0),
+            str(trade.get("order_id", "") or ""),
             1 if trade.get("dry_run") else 0,
             str(trade.get("entry_time", "")),
             str(trade.get("exit_time", "")),
@@ -403,8 +437,42 @@ class Database:
         self._update_daily_summary()
         return trade_id
 
-    def save_snapshot(self, pair: str, price: float, ind, decision) -> None:
+    @staticmethod
+    def _to_py(v):
+        """
+        Konversi APAPUN ke Python native type.
+        Aman untuk PostgreSQL — tidak ada numpy types, tidak ada NaN/Inf.
+        """
+        if v is None:
+            return None
+
         try:
+            import numpy as np
+            if isinstance(v, np.generic):
+                v = v.item()
+        except ImportError:
+            pass
+
+        if isinstance(v, float):
+            import math
+            if math.isnan(v) or math.isinf(v):
+                return 0.0
+            return float(v)
+        if isinstance(v, int):
+            return int(v)
+        if isinstance(v, bool):
+            return bool(v)
+
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            pass
+        return v
+
+    def save_snapshot(self, pair: str, price: float, ind, decision) -> None:
+        """Simpan snapshot market — konversi numpy types sebelum insert."""
+        try:
+            f = self._to_py
             if USE_POSTGRES:
                 sql = """INSERT INTO market_snapshots
                     (pair,price,ema_fast,ema_slow,rsi,macd_hist,
@@ -416,18 +484,19 @@ class Database:
                      bb_signal,volume_spike,trend,buy_score,sell_score,signal,confidence)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"""
             params = (
-                pair, price,
-                getattr(ind, "ema_fast", 0),
-                getattr(ind, "ema_slow", 0),
-                getattr(ind, "rsi", 0),
-                getattr(ind, "macd_hist", 0),
-                getattr(ind, "bb_signal", ""),
+                str(pair),
+                f(price),
+                f(getattr(ind, "ema_fast", 0)),
+                f(getattr(ind, "ema_slow", 0)),
+                f(getattr(ind, "rsi", 0)),
+                f(getattr(ind, "macd_hist", 0)),
+                str(getattr(ind, "bb_signal", "") or ""),
                 1 if getattr(ind, "volume_spike", False) else 0,
-                getattr(ind, "trend", ""),
-                getattr(ind, "buy_score", 0),
-                getattr(ind, "sell_score", 0),
-                decision.action.value if decision else "HOLD",
-                getattr(decision, "confidence", 0),
+                str(getattr(ind, "trend", "") or ""),
+                int(f(getattr(ind, "buy_score", 0)) or 0),
+                int(f(getattr(ind, "sell_score", 0)) or 0),
+                str(decision.action.value if decision else "HOLD"),
+                f(getattr(decision, "confidence", 0)),
             )
             with self._get_conn() as conn:
                 conn.cursor().execute(sql, params)
