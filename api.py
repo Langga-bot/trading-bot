@@ -30,6 +30,10 @@ class IndodaxAPIError(Exception):
 
 
 class IndodaxAPI:
+    """
+    Client Indodax REST API dengan 4 lapis fallback untuk OHLCV.
+    Urutan: ccxt -> TradingView -> Trade history -> Ticker synthetic
+    """
 
     def __init__(self):
         self.api_key     = API_KEY
@@ -52,7 +56,7 @@ class IndodaxAPI:
             "Referer":       "https://indodax.com/",
         })
 
-        # Thread safety untuk private API (nonce harus selalu unik & naik)
+        # Thread safety untuk private API
         self._nonce_lock  = threading.Lock()
         self._last_nonce  = 0
 
@@ -79,7 +83,9 @@ class IndodaxAPI:
         return f"{parts[0]}/{parts[1]}"
 
     def _sign(self, params: dict) -> Tuple[str, str]:
+        """Generate HMAC-SHA512 signature. Thread-safe via _nonce_lock."""
         with self._nonce_lock:
+            # Pastikan nonce selalu naik — tidak ada dua request dengan nonce sama
             nonce = int(time.time() * 1000)
             if nonce <= self._last_nonce:
                 nonce = self._last_nonce + 1
@@ -91,11 +97,13 @@ class IndodaxAPI:
         return body, sig
 
     def _public_get(self, endpoint: str, params: dict = None) -> dict:
+        """GET ke public API. Skip retry langsung pada 403."""
         url = f"{INDODAX_PUBLIC_URL}/{endpoint}"
         for attempt in range(self.max_retries):
             try:
                 r = self.session.get(url, params=params, timeout=8)
                 if r.status_code == 403:
+                    # 403 tidak akan berubah dengan retry — langsung skip
                     raise IndodaxAPIError(f"403 Forbidden: {endpoint}")
                 r.raise_for_status()
                 return r.json()
@@ -104,7 +112,7 @@ class IndodaxAPI:
             except Exception as e:
                 logger.debug(f"[API] HTTP GET attempt {attempt+1}: {e}")
                 if attempt < self.max_retries - 1:
-                    time.sleep(1)
+                    time.sleep(1)   # jeda singkat (bukan 5s) untuk non-403 error
         raise IndodaxAPIError(f"Failed {self.max_retries} retries: {endpoint}")
 
     def _private_post(self, params: dict) -> dict:
@@ -135,6 +143,10 @@ class IndodaxAPI:
 
 
     def get_ticker(self, pair: str) -> dict:
+        """
+        Ambil ticker satu pair dari cache.
+        Cache diisi oleh fetch_all_tickers yang menyimpan semua pair sekaligus.
+        """
         cached = self._ticker_cache.get(pair)
         if cached:
             return cached
@@ -145,6 +157,10 @@ class IndodaxAPI:
         return self._ticker_cache.get(pair) or self._ticker_cache.get(alt_key, {})
 
     def fetch_all_tickers(self, pairs: list) -> dict:
+        """
+        Fetch semua harga dalam SATU request via summaries Indodax.
+        Cache disimpan dengan KEDUA format: btcidr dan btc_idr.
+        """
         self._ticker_cache = {}
 
         try:
@@ -237,6 +253,7 @@ class IndodaxAPI:
 
     @staticmethod
     def _normalize_pair_key(key: str) -> str:
+        """Normalisasi key Indodax ke format standar: btcidr -> btc_idr"""
         key = key.lower().strip()
         if "_" not in key and key.endswith("idr"):
             return key[:-3] + "_idr"
@@ -254,6 +271,7 @@ class IndodaxAPI:
         }
 
     def get_depth(self, pair: str) -> dict:
+        """Ambil order book. Silent jika 403."""
         if self._ccxt:
             try:
                 ob = self._ccxt.fetch_order_book(self._pair_to_symbol(pair), limit=20)
@@ -269,6 +287,7 @@ class IndodaxAPI:
             return {}
 
     def get_trades(self, pair: str) -> List[dict]:
+        """Ambil riwayat trade terbaru (maks 1000 untuk candle yang cukup)."""
         if self._ccxt:
             try:
                 trades = self._ccxt.fetch_trades(
@@ -291,6 +310,12 @@ class IndodaxAPI:
             return []
 
     def get_ohlcv(self, pair: str, tf: str = "5", limit: int = 100) -> List[dict]:
+        """
+        Ambil OHLCV dengan 4 lapis fallback.
+        Hasil di-cache per iterasi untuk menghindari request berulang.
+        tf = timeframe dalam menit: "1","5","15","30","60","240"
+        """
+        # Cek cache (reset tiap iterasi lewat clear_ohlcv_cache)
         cache_key = f"{pair}_{tf}"
         if cache_key in self._ohlcv_cache:
             return self._ohlcv_cache[cache_key]
@@ -365,6 +390,7 @@ class IndodaxAPI:
                 logger.warning(f"[API] OHLCV rate limit {pair}, tunggu 10s...")
                 time.sleep(10)
             elif "400" in err or "invalid" in err.lower():
+                # Timeframe tidak support — coba 1m
                 logger.debug(f"[API] OHLCV {tf_ccxt} tidak support {pair}, coba 1m")
                 try:
                     raw = self._ccxt.fetch_ohlcv(symbol, timeframe="1m", limit=limit)
@@ -547,15 +573,25 @@ class IndodaxAPI:
         })
 
     def place_sell_order(self, pair: str, price: float, coin_amount: float) -> dict:
-        """Eksekusi SELL limit order."""
         coin = pair.replace("_idr", "")
-        logger.info(f"[ORDER] SELL {pair} price={price:,.0f} amount={coin_amount}")
+
+        ticker = self._ticker_cache.get(pair, {})
+        bid    = float(ticker.get("buy", 0) or 0)
+        sell_price = int(bid * 0.999) if bid > 0 else int(price * 0.999)
+
+        coin_amount_rounded = float(f"{coin_amount:.8f}")
+
+        logger.info(
+            f"[ORDER] SELL {pair} | "
+            f"price={sell_price:,.0f} | "
+            f"amount={coin_amount_rounded} {coin.upper()}"
+        )
         return self._private_post({
             "method": "trade",
             "pair":   pair,
             "type":   "sell",
-            "price":  int(price),
-            coin:     coin_amount,
+            "price":  sell_price,
+            coin:     coin_amount_rounded,
         })
 
     def cancel_order(self, pair: str, order_id: str, order_type: str) -> dict:
