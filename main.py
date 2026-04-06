@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Setup logging sebelum import modul lain
 def setup_logging(level: str = "INFO") -> None:
     os.makedirs("logs", exist_ok=True)
     fmt = logging.Formatter(
@@ -22,6 +23,7 @@ def setup_logging(level: str = "INFO") -> None:
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
 
+    # Console handler — paksa UTF-8 agar emoji tidak error di Windows CP1252
     if sys.platform == "win32":
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -38,6 +40,7 @@ def setup_logging(level: str = "INFO") -> None:
     ch.setFormatter(fmt)
     root.addHandler(ch)
 
+    # File handler dengan rotation — selalu UTF-8
     fh = logging.handlers.RotatingFileHandler(
         "logs/bot.log", maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
     )
@@ -58,7 +61,16 @@ from database        import Database
 from notifier        import TelegramNotifier, E, LINE, DLINE
 
 
+
 class TelegramCommandThread(threading.Thread):
+    """
+    Menjalankan Telegram command handler sebagai background thread.
+    Otomatis dimulai bersama bot — tidak perlu terminal terpisah.
+
+    Perintah yang tersedia:
+      /start /help /status /harga /saldo /posisi
+      /laporan /history /pair /config /pause /resume
+    """
 
     PAUSE_FLAG = "data/.bot_paused"
 
@@ -70,8 +82,11 @@ class TelegramCommandThread(threading.Thread):
         self.running  = True
         self.log      = logging.getLogger("telegram_cmd")
 
+        # Normalisasi chat_id: strip whitespace/newline, support koma-separated
         raw_chat = str(TELEGRAM_CONFIG.get("chat_id", "")).strip().strip('"').strip("'")
+        # Simpan semua allowed chat IDs (untuk support grup + private)
         self.allowed_ids = {c.strip() for c in raw_chat.split(",") if c.strip()}
+        # Primary chat_id untuk kirim notifikasi
         self.chat_id = next(iter(self.allowed_ids), "")
         self.log.debug(f"[CMD] Allowed chat IDs: {self.allowed_ids}")
 
@@ -81,7 +96,7 @@ class TelegramCommandThread(threading.Thread):
             r = requests.get(f"{self.base_url}/{method}", params=params, timeout=timeout)
             return r.json()
         except requests.exceptions.ReadTimeout:
-            return {"ok": True, "result": []}
+            return {"ok": True, "result": []}   # normal saat long polling
         except requests.exceptions.ConnectionError:
             return {}
         except Exception as e:
@@ -142,22 +157,23 @@ class TelegramCommandThread(threading.Thread):
 
     def _cmd_help(self, mid, chat_id=None):
         self._send(
-            f"{E['rocket']} <b>Selamat datang di Indodax Trading Bot!</b>\n"
+            f"{E['info']} <b>PANDUAN PERINTAH BOT</b>\n"
             f"<code>{DLINE}</code>\n\n"
-            f"{E['robot']} Bot trading otomatis multi-strategi.\n\n"
-            f"<b>Perintah tersedia:</b>\n"
-            f"<code>{LINE}</code>\n"
-            f"{E['chart']} /status    — Status bot & statistik\n"
-            f"{E['coin']} /harga     — Harga semua pair\n"
-            f"{E['key']} /saldo     — Saldo akun Indodax\n"
-            f"{E['diamond']} /posisi    — Posisi terbuka\n"
-            f"{E['bar']} /laporan   — Performa hari ini\n"
-            f"{E['clock']} /history   — 5 trade terakhir\n"
-            f"{E['pin']} /pair      — Pair yang dimonitor\n"
-            f"{E['info']} /config    — Konfigurasi bot\n"
-            f"{E['stop']} /pause     — Pause (tidak buka posisi baru)\n"
-            f"{E['check']} /resume    — Lanjutkan dari pause\n"
-            f"{E['rocket']} /help      — Bantuan lengkap\n"
+            f"<b>Monitoring Real-time</b>\n"
+            f"/status  — Status aktif/pause, pair, statistik keseluruhan\n"
+            f"/harga   — Harga live semua pair dari Indodax\n"
+            f"/saldo   — Saldo IDR dan koin di akun\n"
+            f"/posisi  — Posisi trading yang sedang terbuka + SL/TP\n\n"
+            f"<b>Laporan & History</b>\n"
+            f"/laporan — Win rate, total trade, net PnL hari ini\n"
+            f"/history — 5 trade terakhir yang sudah ditutup\n\n"
+            f"<b>Konfigurasi</b>\n"
+            f"/pair    — Pair aktif yang dimonitor bot\n"
+            f"/config  — Parameter: SL, TP, trade size, interval\n\n"
+            f"<b>Kontrol Bot</b>\n"
+            f"/pause   — Bot tidak membuka posisi baru\n"
+            f"           (posisi terbuka tetap dimonitor & dilindungi)\n"
+            f"/resume  — Bot kembali normal\n\n"
             f"<code>{LINE}</code>\n"
             f"{E['warn']} Hanya chat ID terdaftar yang bisa mengirim perintah.\n"
             f"{E['clock']} <i>{self._now()}</i>",
@@ -219,6 +235,7 @@ class TelegramCommandThread(threading.Thread):
     def _cmd_harga(self, mid, chat_id=None):
         self._send(f"{E['chart']} Mengambil harga real-time...", reply_id=mid, to_chat=chat_id)
         try:
+            # Fetch harga via summaries (tidak ganggu cache bot utama)
             import requests as req
             r = req.get(
                 "https://indodax.com/api/summaries",
@@ -233,6 +250,7 @@ class TelegramCommandThread(threading.Thread):
                     if key in data:
                         tickers_raw[pair] = data[key]
 
+            # Fallback ke cache bot jika summaries kosong
             if not tickers_raw:
                 tickers_raw = self.bot.api._ticker_cache or {}
 
@@ -265,10 +283,12 @@ class TelegramCommandThread(threading.Thread):
     def _cmd_saldo(self, mid, chat_id=None):
         self._send(f"{E['key']} Mengambil saldo...", reply_id=mid, to_chat=chat_id)
         try:
+            # Gunakan referensi ke bot untuk akses API yang sudah thread-safe
             info = self.bot.api.get_balance()
             bal  = info.get("balance", {})
             idr  = float(bal.get("idr", 0) or 0)
 
+            # Portfolio slot info
             portfolio = self.bot.risk.get_portfolio_summary()
             slot_size = portfolio.get("slot_size", 0)
             slots_used = portfolio.get("slots_used", 0)
@@ -492,7 +512,25 @@ class TelegramCommandThread(threading.Thread):
         "/config":  "_cmd_config",
         "/pause":   "_cmd_pause",
         "/resume":  "_cmd_resume",
+        "/jual":    "_cmd_jual",
     }
+
+    def _cmd_jual(self, mid, chat_id=None):
+        """
+        /jual <pair> - Force sell posisi yang sedang terbuka.
+        Contoh: /jual ont_idr
+        """
+        self._send(
+            f"{E['info']} <b>Perintah /jual</b>\n"
+            f"Format: <code>/jual &lt;pair&gt;</code>\n"
+            f"Contoh: <code>/jual ont_idr</code>\n\n"
+            f"Posisi terbuka saat ini:\n"
+            + "\n".join(
+                f"  {E['fire']} <code>{p}</code>"
+                for p in self.bot.risk.positions
+            ) or "  Tidak ada posisi terbuka",
+            reply_id=mid, to_chat=chat_id,
+        )
 
     def _handle_update(self, update: dict):
         msg     = update.get("message", {})
@@ -503,17 +541,23 @@ class TelegramCommandThread(threading.Thread):
         text    = (msg.get("text") or "").strip()
 
         if chat_id not in self.allowed_ids:
-            self.log.warning(
-                f"[CMD] Ditolak dari chat {chat_id} "
-                f"(allowed: {self.allowed_ids})"
-            )
+            self.log.warning(f"[CMD] Ditolak dari chat {chat_id}")
             return
         if not text.startswith("/"):
             return
 
-        cmd = text.split()[0].split("@")[0].lower()
-        self.log.info(f"[CMD] {cmd} dari {chat_id}")
+        parts = text.split()
+        cmd   = parts[0].split("@")[0].lower()
+        args  = parts[1:] if len(parts) > 1 else []
 
+        if cmd == "/jual" and args:
+            pair = args[0].lower().strip()
+            if not pair.endswith("_idr"):
+                pair = pair + "_idr"
+            self._force_sell(pair, msg_id, chat_id)
+            return
+
+        self.log.info(f"[CMD] {cmd} dari {chat_id}")
         handler_name = self.HANDLERS.get(cmd)
         if handler_name:
             try:
@@ -526,8 +570,52 @@ class TelegramCommandThread(threading.Thread):
         else:
             self._cmd_unknown(msg_id, cmd, chat_id)
 
+    def _force_sell(self, pair: str, msg_id: int, chat_id: str):
+        """Eksekusi force sell untuk posisi terbuka."""
+        pos = self.bot.risk.positions.get(pair)
+        if not pos:
+            self._send(
+                f"{E['warn']} Tidak ada posisi terbuka untuk <code>{pair}</code>.\n\n"
+                f"Posisi aktif:\n"
+                + ("\n".join(f"  {E['fire']} <code>{p}</code>" for p in self.bot.risk.positions)
+                   or "  Tidak ada"),
+                reply_id=msg_id, to_chat=chat_id,
+            )
+            return
+
+        current_price = self.bot.api.get_current_price(pair)
+        if not current_price:
+            self._send(f"{E['cross']} Gagal ambil harga {pair}.", to_chat=chat_id)
+            return
+
+        unreal_pct = (current_price - pos.entry_price) / pos.entry_price * 100
+        sign = "+" if unreal_pct >= 0 else ""
+
+        self._send(
+            f"{E['warn']} <b>KONFIRMASI FORCE SELL</b>\n"
+            f"<code>{LINE}</code>\n"
+            f"Pair   : <code>{pair.upper().replace('_','/')}</code>\n"
+            f"Entry  : <code>Rp {pos.entry_price:,.0f}</code>\n"
+            f"Harga  : <code>Rp {current_price:,.0f}</code>\n"
+            f"PnL    : <code>{sign}{unreal_pct:.2f}%</code>\n\n"
+            f"Eksekusi SELL sekarang...",
+            reply_id=msg_id, to_chat=chat_id,
+        )
+
+        try:
+            self.bot._execute_sell(pair, current_price, "FORCE SELL via Telegram")
+            self._send(
+                f"{E['check']} Force sell <code>{pair.upper().replace('_','/')}</code> "
+                f"@ Rp {current_price:,.0f} dieksekusi.",
+                to_chat=chat_id,
+            )
+        except Exception as e:
+            self._send(f"{E['cross']} Force sell gagal: {e}", to_chat=chat_id)
+
+    # ── Thread run ───────────────────────────────────────────────────────────
 
     def run(self):
+        """Loop long polling — berjalan sebagai daemon thread."""
         self.log.info("[CMD] Telegram command handler thread dimulai")
         self._send(
             f"{E['check']} <b>Bot + Command Handler aktif!</b>\n"
@@ -576,6 +664,10 @@ class TelegramCommandThread(threading.Thread):
 
 
 class TradingBot:
+    """
+    Bot trading utama.
+    Command handler Telegram berjalan otomatis sebagai thread daemon.
+    """
 
     def __init__(self, dry_run: bool = None, start_cmd_thread: bool = True):
         self.api      = IndodaxAPI()
@@ -586,6 +678,7 @@ class TradingBot:
         self.running  = False
         self.dry_run  = dry_run if dry_run is not None else BOT_CONFIG.get("dry_run", False)
 
+        # Sinkronisasi dry_run ke notifier
         self.notifier.set_dry_run(self.dry_run)
 
         self._startup_ohlcv_check()
@@ -606,6 +699,7 @@ class TradingBot:
         logger.info("=" * 60)
 
     def _startup_ohlcv_check(self):
+        """Test OHLCV sekali saat startup untuk diagnosa environment."""
         test_pair = TRADING_PAIRS[0] if TRADING_PAIRS else "btc_idr"
         logger.info(f"[BOT] Startup OHLCV check: {test_pair}...")
         try:
@@ -615,6 +709,7 @@ class TradingBot:
                 limit=10,
             )
             if candles and len(candles) >= 5:
+                # Cek apakah candle real atau sintetis
                 closes = [c.get("close", 0) for c in candles]
                 unique = len(set(round(c, -2) for c in closes))
                 if unique > 2:
@@ -633,8 +728,10 @@ class TradingBot:
         except Exception as e:
             logger.warning(f"[BOT] Startup OHLCV check error: {e}")
 
+    # ─── SIGNAL HANDLER ─────────────────────────────────────────────────────
 
     def _setup_signals(self):
+        """Tangkap SIGINT/SIGTERM untuk graceful shutdown."""
         def handler(sig, frame):
             logger.info("\n[BOT] Shutdown signal diterima...")
             self.running = False
@@ -643,10 +740,10 @@ class TradingBot:
 
 
     def run(self) -> None:
-
+        """Jalankan bot dalam loop infinite."""
         self._setup_signals()
         self.running = True
-
+        # Ambil saldo real dari akun, set ukuran slot sekali di awal
         logger.info("[BOT] Mengambil saldo awal untuk portfolio slot...")
         try:
             real_balance = self.api.get_available_idr() if not self.dry_run else 100_000
@@ -659,6 +756,8 @@ class TradingBot:
             self.risk.set_initial_balance(
                 RISK_CONFIG.get("initial_balance_idr", 0) or 100_000
             )
+
+        self._restore_positions_from_db()
 
         self.notifier.notify_bot_start(TRADING_PAIRS)
         logger.info("[BOT] Bot mulai berjalan...")
@@ -682,18 +781,28 @@ class TradingBot:
                 logger.info("[BOT] PAUSE aktif (via Telegram /pause) - skip iterasi ini")
                 time.sleep(30)
                 continue
+            # Prioritas: pair dengan posisi terbuka SELALU diproses meski
+            # tidak ada di TRADING_PAIRS (untuk SL/TP monitoring)
+            open_pairs = list(self.risk.positions.keys())
+            pairs_to_process = []
+            for op in open_pairs:
+                if op not in pairs_to_process:
+                    pairs_to_process.append(op)
+            for p in TRADING_PAIRS:
+                if p not in pairs_to_process:
+                    pairs_to_process.append(p)
+
+            if open_pairs:
+                extra = [p for p in open_pairs if p not in TRADING_PAIRS]
+                if extra:
+                    logger.info(f"[BOT] Monitor extra pairs (ada posisi): {extra}")
 
             self.api.clear_ohlcv_cache()
-            ticker_ok = False
             try:
-                result = self.api.fetch_all_tickers(TRADING_PAIRS)
-                ticker_ok = bool(result)
-                if not ticker_ok:
+                result = self.api.fetch_all_tickers(pairs_to_process)
+                if not result and not open_pairs:
                     backoff = BOT_CONFIG.get("rate_limit_backoff", 30)
-                    logger.warning(
-                        f"[BOT] Semua ticker gagal (rate limit?), "
-                        f"tunggu {backoff}s sebelum lanjut..."
-                    )
+                    logger.warning(f"[BOT] Semua ticker gagal, tunggu {backoff}s...")
                     time.sleep(backoff)
                     continue
             except Exception as e:
@@ -702,7 +811,7 @@ class TradingBot:
                 continue
 
             pair_delay = BOT_CONFIG.get("pair_delay", 0.5)
-            for i, pair in enumerate(TRADING_PAIRS):
+            for i, pair in enumerate(pairs_to_process):
                 if not self.running:
                     break
                 try:
@@ -713,18 +822,20 @@ class TradingBot:
                 except Exception as e:
                     logger.exception(f"[BOT] Unexpected error untuk {pair}: {e}")
                     self.notifier.notify_error(str(e), pair)
-  
-                if i < len(TRADING_PAIRS) - 1 and pair_delay > 0:
+                if i < len(pairs_to_process) - 1 and pair_delay > 0:
                     time.sleep(pair_delay)
 
+            # Tidur sampai interval berikutnya
             elapsed  = time.time() - start_time
             sleep_t  = max(0, BOT_CONFIG["loop_interval"] - elapsed)
             logger.info(f"[BOT] Selesai dalam {elapsed:.1f}s | Tidur {sleep_t:.1f}s")
             time.sleep(sleep_t)
 
+        # Shutdown
         self._graceful_shutdown()
 
     def run_once(self) -> None:
+        """Jalankan satu iterasi saja (untuk testing/debugging)."""
         logger.info("[BOT] run_once - fetch batch ticker...")
         try:
             self.api.fetch_all_tickers(TRADING_PAIRS)
@@ -738,13 +849,20 @@ class TradingBot:
 
 
     def _process_pair(self, pair: str) -> None:
-
+        """Proses satu trading pair: analisis -> validasi -> eksekusi."""
         logger.info(f"[BOT] Proses {pair.upper()}")
 
-        # ── 1. Ambil harga terkini ──
         current_price = self.api.get_current_price(pair)
+
         if not current_price:
-            logger.warning(f"[BOT] Gagal ambil harga {pair}")
+            cached = self.api._ticker_cache.get(pair, {})
+            current_price = float(cached.get("last", 0) or 0) or None
+
+        if not current_price:
+            if pair in self.risk.positions:
+                logger.warning(f"[BOT] Gagal ambil harga {pair} - posisi terbuka, akan dicek iterasi berikutnya")
+            else:
+                logger.warning(f"[BOT] Gagal ambil harga {pair}")
             return
 
         if pair in self.risk.positions:
@@ -763,6 +881,10 @@ class TradingBot:
                     f"PnL={sign}{unreal_pct:.2f}% | "
                     f"SL={pos.stop_loss:,.0f} TP={pos.take_profit:,.0f}"
                 )
+                try:
+                    self.db.save_open_position(pair, pos)
+                except Exception:
+                    pass
 
         candles = self.api.get_ohlcv(
             pair,
@@ -780,8 +902,7 @@ class TradingBot:
             logger.debug(f"[BOT] {pair} candle sintetis, skip analisis entry")
             return
 
-        depth = self.api.get_depth(pair)
-
+        depth    = self.api.get_depth(pair)
         decision = self.strategy.analyze_and_decide(candles, depth if depth else None)
         summary  = self.strategy.get_signal_summary(decision)
         logger.info(f"[BOT] {pair} -> {summary}")
@@ -794,8 +915,8 @@ class TradingBot:
             if decision.action == Signal.SELL:
                 exit_reason = f"STRATEGY SELL: {', '.join(decision.reasons[:2])}"
                 self._execute_sell(pair, current_price, exit_reason, decision)
-            return  
-        
+            return
+
         if decision.action != Signal.BUY:
             return
 
@@ -819,6 +940,8 @@ class TradingBot:
         available_idr: float,
         decision,
     ) -> None:
+        """Eksekusi order BUY — isi satu slot portfolio."""
+        # Ukuran slot selalu fixed dari saldo awal (bukan % dari saldo sekarang)
         trade_size  = self.risk.calc_trade_size(available_idr)
         if trade_size <= 0:
             logger.warning(f"[BUY] Trade size 0 untuk {pair}, skip")
@@ -855,8 +978,10 @@ class TradingBot:
             order_id=order_id,
         )
 
+        # Tulis posisi terbuka ke file JSON (dibaca oleh telegram_commands.py)
         self._save_positions()
 
+        # Simpan ke DB (BUY record, exit akan update)
         trade_record = {
             "pair":         pair,
             "trade_type":   "BUY",
@@ -876,6 +1001,7 @@ class TradingBot:
         }
         self.db.save_trade(trade_record)
 
+        # Notifikasi — sertakan info slot portfolio
         ind       = decision.indicator_result
         rsi_val   = getattr(ind, "rsi", 0) if ind else 0
         trend_val = getattr(ind, "trend", "") if ind else ""
@@ -905,29 +1031,50 @@ class TradingBot:
         reason: str,
         decision=None,
     ) -> None:
+        """Eksekusi order SELL dan tutup posisi."""
         pos = self.risk.positions.get(pair)
         if not pos:
+            logger.warning(f"[SELL] Tidak ada posisi untuk {pair}")
             return
 
-        logger.info(f"[SELL] {pair} | price={price:,.0f} | reason={reason}")
+        logger.info(
+            f"[SELL] {pair} | price={price:,.0f} | reason={reason}\n"
+            f"       entry={pos.entry_price:,.0f} | amount={pos.coin_amount:.8f}"
+        )
 
-        order_id = ""
+        order_id   = ""
+        sell_failed = False
+
         if not self.dry_run:
             try:
-                resp = self.api.place_sell_order(pair, price * 1.001, pos.coin_amount)
+                resp     = self.api.place_sell_order(pair, price, pos.coin_amount)
                 order_id = str(resp.get("order_id", ""))
+                logger.info(f"[SELL] Order berhasil: order_id={order_id}")
             except IndodaxAPIError as e:
-                logger.error(f"[SELL] Order gagal: {e}")
-                return
+                logger.error(f"[SELL] Order GAGAL untuk {pair}: {e}")
+                self.notifier.send(
+                    f"⚠️ <b>SELL ORDER GAGAL</b>\n"
+                    f"Pair   : <code>{pair.upper().replace('_','/')}</code>\n"
+                    f"Alasan : <code>{reason}</code>\n"
+                    f"Error  : <code>{str(e)[:100]}</code>\n"
+                    f"<i>Cek akun Indodax — jual manual jika perlu!</i>"
+                )
+                sell_failed = True
 
-        entry_price_snap = pos.entry_price 
+        entry_price_snap = pos.entry_price
 
         pnl_data = self.risk.close_position(pair, price)
         if not pnl_data:
             return
 
+        try:
+            self.db.delete_open_position(pair)
+        except Exception as e:
+            logger.warning(f"[BOT] delete_open_position error: {e}")
+
         self._save_positions()
 
+        # Update DB
         trade_record = {
             "pair":         pair,
             "trade_type":   "SELL",
@@ -948,6 +1095,7 @@ class TradingBot:
         }
         self.db.save_trade(trade_record)
 
+        # Notifikasi
         self.notifier.notify_sell(
             pair=pair,
             exit_price=price,
@@ -959,9 +1107,87 @@ class TradingBot:
             entry_price=entry_price_snap,
         )
 
-    def _save_positions(self) -> None:
-        import json
+    def _restore_positions_from_db(self) -> None:
+        """
+        Load posisi terbuka dari database saat bot restart.
+        Pair yang ada di DB tapi tidak di TRADING_PAIRS akan ditambahkan
+        sementara agar SL/TP tetap bisa diproses.
+        """
+        from risk_management import Position
         try:
+            saved = self.db.load_open_positions()
+            if not saved:
+                logger.info("[BOT] Tidak ada posisi tersimpan di database")
+                return
+
+            restored = 0
+            for row in saved:
+                pair = row["pair"]
+                if pair in self.risk.positions:
+                    continue
+
+                try:
+                    entry_time = datetime.fromisoformat(str(row["entry_time"]))
+                except Exception:
+                    entry_time = datetime.now()
+
+                pos = Position(
+                    pair         = pair,
+                    entry_price  = float(row["entry_price"]),
+                    coin_amount  = float(row["coin_amount"]),
+                    idr_invested = float(row["idr_invested"]),
+                    slot_size    = float(row.get("slot_size") or self.risk._slot_size),
+                    entry_time   = entry_time,
+                    order_id     = str(row.get("order_id") or ""),
+                )
+                pos.stop_loss           = float(row["stop_loss"])
+                pos.take_profit         = float(row["take_profit"])
+                pos.trailing_stop_price = float(row.get("trailing_stop_price") or row["stop_loss"])
+                pos.highest_price       = float(row.get("highest_price") or row["entry_price"])
+
+                self.risk.positions[pair] = pos
+                restored += 1
+
+                if pair not in TRADING_PAIRS:
+                    TRADING_PAIRS.append(pair)
+                    logger.info(f"[BOT] {pair} ditambahkan ke TRADING_PAIRS untuk monitor SL/TP")
+
+                unreal_pct = 0.0
+                logger.info(
+                    f"[BOT] Posisi dipulihkan: {pair} | "
+                    f"entry={pos.entry_price:,.0f} | "
+                    f"SL={pos.stop_loss:,.0f} | "
+                    f"TP={pos.take_profit:,.0f}"
+                )
+
+            if restored:
+                logger.info(f"[BOT] {restored} posisi dipulihkan dari database")
+                logger.info(f"[BOT] TRADING_PAIRS aktif: {TRADING_PAIRS}")
+                pairs_info = "\n".join(
+                    f"  {p}: entry={self.risk.positions[p].entry_price:,.0f} "
+                    f"SL={self.risk.positions[p].stop_loss:,.0f} "
+                    f"TP={self.risk.positions[p].take_profit:,.0f}"
+                    for p in self.risk.positions
+                )
+                self.notifier.send(
+                    f"<b>Bot restart - {restored} posisi dipulihkan</b>\n"
+                    f"<code>{pairs_info}</code>\n"
+                    f"SL/TP aktif dan dimonitor."
+                )
+
+        except Exception as e:
+            logger.error(f"[BOT] _restore_positions_from_db error: {e}")
+
+    def _save_positions(self) -> None:
+        """Simpan semua posisi terbuka ke database (persistent)."""
+        try:
+            for pair, pos in self.risk.positions.items():
+                self.db.save_open_position(pair, pos)
+        except Exception as e:
+            logger.warning(f"[BOT] _save_positions DB error: {e}")
+
+        try:
+            import json
             os.makedirs("data", exist_ok=True)
             positions = {}
             for pair, pos in self.risk.positions.items():
@@ -976,12 +1202,14 @@ class TradingBot:
             with open("data/open_positions.json", "w") as f:
                 json.dump(positions, f, indent=2)
         except Exception as e:
-            logger.debug(f"[BOT] _save_positions error: {e}")
+            logger.debug(f"[BOT] _save_positions JSON error: {e}")
 
 
     def _graceful_shutdown(self) -> None:
+        """Tutup semua posisi dan shutdown bot."""
         logger.info("[BOT] Graceful shutdown dimulai...")
 
+        # Hentikan command handler thread
         if self.cmd_thread and self.cmd_thread.is_alive():
             logger.info("[BOT] Menghentikan Telegram command thread...")
             self.cmd_thread.stop()
@@ -1005,6 +1233,7 @@ class TradingBot:
             )
 
         logger.info("[BOT] Bot berhasil dihentikan")
+
 
 
 def main():
@@ -1047,11 +1276,13 @@ def main():
         bt.export_trades_csv(result, f"data/backtest_{pair}.csv")
         return
 
+    # Prioritas: --dry > --live > default (live)
     if args.dry:
         dry_run = True
     elif args.live:
         dry_run = False
     else:
+        # Tidak ada flag: default LIVE (baca dari config sebagai override)
         dry_run = BOT_CONFIG.get("dry_run", False)
 
     if dry_run:
