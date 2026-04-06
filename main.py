@@ -9,9 +9,6 @@ import json
 import threading
 import requests
 from datetime import datetime, time as dt_time
-from dotenv import load_dotenv
-
-load_dotenv()
 
 # Setup logging sebelum import modul lain
 def setup_logging(level: str = "INFO") -> None:
@@ -63,6 +60,15 @@ from notifier        import TelegramNotifier, E, LINE, DLINE
 
 
 class TelegramCommandThread(threading.Thread):
+    """
+    Menjalankan Telegram command handler sebagai background thread.
+    Otomatis dimulai bersama bot — tidak perlu terminal terpisah.
+
+    Perintah yang tersedia:
+      /start /help /status /harga /saldo /posisi
+      /laporan /history /pair /config /pause /resume
+    """
+
     PAUSE_FLAG = "data/.bot_paused"
 
     def __init__(self, bot_ref):
@@ -148,7 +154,7 @@ class TelegramCommandThread(threading.Thread):
 
     def _cmd_help(self, mid, chat_id=None):
         self._send(
-            f"{E['rocket']} <b>Selamat datang di Indodax Trading Bot!</b>\n"
+           f"{E['rocket']} <b>Selamat datang di Indodax Trading Bot!</b>\n"
             f"<code>{DLINE}</code>\n\n"
             f"{E['robot']} Bot trading otomatis multi-strategi.\n\n"
             f"<b>Perintah tersedia:</b>\n"
@@ -506,6 +512,10 @@ class TelegramCommandThread(threading.Thread):
     }
 
     def _cmd_jual(self, mid, chat_id=None):
+        """
+        /jual <pair> - Force sell posisi yang sedang terbuka.
+        Contoh: /jual ont_idr
+        """
         self._send(
             f"{E['info']} <b>Perintah /jual</b>\n"
             f"Format: <code>/jual &lt;pair&gt;</code>\n"
@@ -650,7 +660,6 @@ class TelegramCommandThread(threading.Thread):
 
 class TradingBot:
 
-
     def __init__(self, dry_run: bool = None, start_cmd_thread: bool = True):
         self.api      = IndodaxAPI()
         self.strategy = StrategyEngine()
@@ -763,7 +772,7 @@ class TradingBot:
                 logger.info("[BOT] PAUSE aktif (via Telegram /pause) - skip iterasi ini")
                 time.sleep(30)
                 continue
-
+                
             # Prioritas: pair dengan posisi terbuka SELALU diproses meski
             # tidak ada di TRADING_PAIRS (untuk SL/TP monitoring)
             open_pairs = list(self.risk.positions.keys())
@@ -944,19 +953,74 @@ class TradingBot:
         )
 
         order_id = ""
+        actual_coin_amount = coin_amount  # default kalkulasi
+        actual_price       = price
+
         if not self.dry_run:
             try:
-                resp = self.api.place_buy_order(pair, price * 0.999, trade_size)
+                resp     = self.api.place_buy_order(pair, price, trade_size)
                 order_id = str(resp.get("order_id", ""))
+                logger.info(f"[BUY] Order dikirim: order_id={order_id}")
+
+                # Verifikasi apakah order langsung terisi
+                # Tunggu maks 30 detik, cek setiap 5 detik
+                filled         = False
+                filled_amount  = 0.0
+                filled_price   = price
+
+                for attempt in range(6):
+                    time.sleep(5)
+                    status = self.api.get_order_status(pair, order_id)
+                    order  = status.get("order", status)
+
+                    remain_idr  = float(order.get("remain_idr", trade_size) or trade_size)
+                    remain_coin = float(order.get("remain", coin_amount) or coin_amount)
+                    order_state = str(order.get("status", "")).lower()
+
+                    logger.info(
+                        f"[BUY] Check order {order_id} | "
+                        f"status={order_state} | "
+                        f"remain_idr={remain_idr:,.0f} | "
+                        f"attempt={attempt+1}/6"
+                    )
+
+                    if order_state in ("filled", "complete", "completed") or remain_idr <= 500:
+                        filled        = True
+                        filled_amount = float(order.get("amount_idr", 0) or 0) / price
+                        if filled_amount <= 0:
+                            filled_amount = self.api.get_coin_balance(pair)
+                        filled_amount = max(filled_amount, coin_amount * 0.95)
+                        break
+
+                if not filled:
+                    logger.warning(
+                        f"[BUY] Order {order_id} belum terisi setelah 30s — batalkan"
+                    )
+                    self.api.cancel_order_by_id(pair, order_id, "buy")
+                    self.notifier.send(
+                        f"\u26a0\ufe0f <b>BUY ORDER DIBATALKAN</b>\n"
+                        f"Pair  : <code>{pair.upper().replace('_','/')}</code>\n"
+                        f"Alasan: Order limit tidak terisi dalam 30 detik.\n"
+                        f"<i>Harga mungkin bergerak terlalu cepat.</i>"
+                    )
+                    return
+
+                # Update coin_amount dengan jumlah yang benar-benar diterima
+                actual_coin_amount = filled_amount
+                logger.info(
+                    f"[BUY] Order terisi: {actual_coin_amount:.8f} "
+                    f"{pair.replace('_idr','').upper()}"
+                )
+
             except IndodaxAPIError as e:
                 logger.error(f"[BUY] Order gagal: {e}")
                 return
 
-        # Catat posisi
+        # Catat posisi dengan coin_amount yang AKTUAL (bukan kalkulasi)
         pos = self.risk.open_position(
             pair=pair,
-            entry_price=price,
-            coin_amount=coin_amount,
+            entry_price=actual_price,
+            coin_amount=actual_coin_amount,
             idr_invested=trade_size,
             order_id=order_id,
         )
@@ -968,9 +1032,9 @@ class TradingBot:
         trade_record = {
             "pair":         pair,
             "trade_type":   "BUY",
-            "entry_price":  price,
+            "entry_price":  actual_price,
             "exit_price":   0,
-            "coin_amount":  coin_amount,
+            "coin_amount":  actual_coin_amount,
             "idr_invested": trade_size,
             "idr_received": 0,
             "pnl_idr":      0,
@@ -1278,7 +1342,6 @@ def main():
         bt.export_trades_csv(result, f"data/backtest_{pair}.csv")
         return
 
-    # Prioritas: --dry > --live > default (live)
     if args.dry:
         dry_run = True
     elif args.live:
