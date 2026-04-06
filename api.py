@@ -30,10 +30,6 @@ class IndodaxAPIError(Exception):
 
 
 class IndodaxAPI:
-    """
-    Client Indodax REST API dengan 4 lapis fallback untuk OHLCV.
-    Urutan: ccxt -> TradingView -> Trade history -> Ticker synthetic
-    """
 
     def __init__(self):
         self.api_key     = API_KEY
@@ -143,7 +139,10 @@ class IndodaxAPI:
 
 
     def get_ticker(self, pair: str) -> dict:
-
+        """
+        Ambil ticker satu pair dari cache.
+        Cache diisi oleh fetch_all_tickers yang menyimpan semua pair sekaligus.
+        """
         cached = self._ticker_cache.get(pair)
         if cached:
             return cached
@@ -154,10 +153,6 @@ class IndodaxAPI:
         return self._ticker_cache.get(pair) or self._ticker_cache.get(alt_key, {})
 
     def fetch_all_tickers(self, pairs: list) -> dict:
-        """
-        Fetch semua harga dalam SATU request via summaries Indodax.
-        Cache disimpan dengan KEDUA format: btcidr dan btc_idr.
-        """
         self._ticker_cache = {}
 
         try:
@@ -470,11 +465,6 @@ class IndodaxAPI:
         return []
 
     def _build_ohlcv_from_ticker(self, pair: str, limit: int = 100) -> List[dict]:
-        """
-        Fallback akhir: candle sintetis dari ticker.
-        Bot tetap jalan tapi TIDAK akan eksekusi trade
-        karena sinyal tidak reliable dari data sintetis.
-        """
         try:
             ticker = self.get_ticker(pair)
             price  = float(ticker.get("last", 0) or 0)
@@ -559,15 +549,51 @@ class IndodaxAPI:
             return []
 
     def place_buy_order(self, pair: str, price: float, amount_idr: float) -> dict:
-        """Eksekusi BUY limit order."""
-        logger.info(f"[ORDER] BUY {pair} price={price:,.0f} IDR={amount_idr:,.0f}")
+        """
+        Eksekusi BUY order dengan harga ask (jual terbaik) agar langsung terisi.
+        Tidak pakai limit order yang bisa pending lama.
+        """
+        ticker     = self._ticker_cache.get(pair, {})
+        ask        = float(ticker.get("sell", 0) or 0)
+        buy_price  = int(ask * 1.001) if ask > 0 else int(price * 1.001)
+
+        logger.info(
+            f"[ORDER] BUY {pair} | price={buy_price:,.0f} | IDR={amount_idr:,.0f}"
+        )
         return self._private_post({
             "method": "trade",
             "pair":   pair,
             "type":   "buy",
-            "price":  int(price),
+            "price":  buy_price,
             "idr":    int(amount_idr),
         })
+
+    def get_order_status(self, pair: str, order_id: str) -> dict:
+        """Cek status order — apakah sudah terisi atau masih pending."""
+        try:
+            return self._private_post({
+                "method":   "getOrder",
+                "pair":     pair,
+                "order_id": int(order_id),
+            })
+        except Exception as e:
+            logger.warning(f"[API] get_order_status {pair} {order_id}: {e}")
+            return {}
+
+    def cancel_order_by_id(self, pair: str, order_id: str, order_type: str = "buy") -> bool:
+        """Batalkan order yang pending."""
+        try:
+            self._private_post({
+                "method":   "cancelOrder",
+                "pair":     pair,
+                "order_id": int(order_id),
+                "type":     order_type,
+            })
+            logger.info(f"[API] Order {order_id} dibatalkan ({pair})")
+            return True
+        except Exception as e:
+            logger.warning(f"[API] cancel_order {pair} {order_id}: {e}")
+            return False
 
     def place_sell_order(self, pair: str, price: float, coin_amount: float) -> dict:
         """
