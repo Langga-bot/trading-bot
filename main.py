@@ -63,15 +63,6 @@ from notifier        import TelegramNotifier, E, LINE, DLINE
 
 
 class TelegramCommandThread(threading.Thread):
-    """
-    Menjalankan Telegram command handler sebagai background thread.
-    Otomatis dimulai bersama bot — tidak perlu terminal terpisah.
-
-    Perintah yang tersedia:
-      /start /help /status /harga /saldo /posisi
-      /laporan /history /pair /config /pause /resume
-    """
-
     PAUSE_FLAG = "data/.bot_paused"
 
     def __init__(self, bot_ref):
@@ -515,10 +506,6 @@ class TelegramCommandThread(threading.Thread):
     }
 
     def _cmd_jual(self, mid, chat_id=None):
-        """
-        /jual <pair> - Force sell posisi yang sedang terbuka.
-        Contoh: /jual ont_idr
-        """
         self._send(
             f"{E['info']} <b>Perintah /jual</b>\n"
             f"Format: <code>/jual &lt;pair&gt;</code>\n"
@@ -611,7 +598,6 @@ class TelegramCommandThread(threading.Thread):
         except Exception as e:
             self._send(f"{E['cross']} Force sell gagal: {e}", to_chat=chat_id)
 
-    # ── Thread run ───────────────────────────────────────────────────────────
 
     def run(self):
         """Loop long polling — berjalan sebagai daemon thread."""
@@ -663,10 +649,7 @@ class TelegramCommandThread(threading.Thread):
 
 
 class TradingBot:
-    """
-    Bot trading utama.
-    Command handler Telegram berjalan otomatis sebagai thread daemon.
-    """
+
 
     def __init__(self, dry_run: bool = None, start_cmd_thread: bool = True):
         self.api      = IndodaxAPI()
@@ -727,7 +710,6 @@ class TradingBot:
         except Exception as e:
             logger.warning(f"[BOT] Startup OHLCV check error: {e}")
 
-    # ─── SIGNAL HANDLER ─────────────────────────────────────────────────────
 
     def _setup_signals(self):
         """Tangkap SIGINT/SIGTERM untuk graceful shutdown."""
@@ -742,6 +724,7 @@ class TradingBot:
         """Jalankan bot dalam loop infinite."""
         self._setup_signals()
         self.running = True
+
         # Ambil saldo real dari akun, set ukuran slot sekali di awal
         logger.info("[BOT] Mengambil saldo awal untuk portfolio slot...")
         try:
@@ -780,6 +763,7 @@ class TradingBot:
                 logger.info("[BOT] PAUSE aktif (via Telegram /pause) - skip iterasi ini")
                 time.sleep(30)
                 continue
+
             # Prioritas: pair dengan posisi terbuka SELALU diproses meski
             # tidak ada di TRADING_PAIRS (untuk SL/TP monitoring)
             open_pairs = list(self.risk.positions.keys())
@@ -1038,27 +1022,46 @@ class TradingBot:
 
         logger.info(
             f"[SELL] {pair} | price={price:,.0f} | reason={reason}\n"
-            f"       entry={pos.entry_price:,.0f} | amount={pos.coin_amount:.8f}"
+            f"       entry={pos.entry_price:,.0f} | amount_db={pos.coin_amount:.8f}"
         )
 
-        order_id   = ""
+        order_id    = ""
         sell_failed = False
 
         if not self.dry_run:
             try:
-                resp     = self.api.place_sell_order(pair, price, pos.coin_amount)
+                # Ambil saldo koin REAL dari akun — bukan dari database
+                # Ini mencegah error "Insufficient balance"
+                real_amount = self.api.get_coin_balance(pair)
+                if real_amount <= 0:
+                    raise IndodaxAPIError(
+                        f"Saldo {pair.replace('_idr','').upper()} = 0 di akun. "
+                        f"Mungkin sudah terjual manual."
+                    )
+
+                # Gunakan saldo real, bukan dari DB
+                sell_amount = real_amount
+                logger.info(
+                    f"[SELL] Saldo real {pair.replace('_idr','').upper()}: "
+                    f"{real_amount:.8f} (DB: {pos.coin_amount:.8f})"
+                )
+
+                resp     = self.api.place_sell_order(pair, price, sell_amount)
                 order_id = str(resp.get("order_id", ""))
                 logger.info(f"[SELL] Order berhasil: order_id={order_id}")
+
             except IndodaxAPIError as e:
                 logger.error(f"[SELL] Order GAGAL untuk {pair}: {e}")
                 self.notifier.send(
-                    f"⚠️ <b>SELL ORDER GAGAL</b>\n"
+                    f"\u26a0\ufe0f <b>SELL ORDER GAGAL</b>\n"
                     f"Pair   : <code>{pair.upper().replace('_','/')}</code>\n"
                     f"Alasan : <code>{reason}</code>\n"
-                    f"Error  : <code>{str(e)[:100]}</code>\n"
-                    f"<i>Cek akun Indodax — jual manual jika perlu!</i>"
+                    f"Error  : <code>{str(e)[:120]}</code>\n"
+                    f"<i>Cek akun Indodax \u2014 jual manual jika perlu!</i>"
                 )
                 sell_failed = True
+                # Tetap tutup posisi di bot meski order gagal
+                # agar bot tidak terus mencoba jual di setiap iterasi
 
         entry_price_snap = pos.entry_price
 
