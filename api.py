@@ -56,7 +56,7 @@ class IndodaxAPI:
             "Referer":       "https://indodax.com/",
         })
 
-        # Thread safety untuk private API
+        # Thread safety untuk private API (nonce harus selalu unik & naik)
         self._nonce_lock  = threading.Lock()
         self._last_nonce  = 0
 
@@ -143,10 +143,7 @@ class IndodaxAPI:
 
 
     def get_ticker(self, pair: str) -> dict:
-        """
-        Ambil ticker satu pair dari cache.
-        Cache diisi oleh fetch_all_tickers yang menyimpan semua pair sekaligus.
-        """
+
         cached = self._ticker_cache.get(pair)
         if cached:
             return cached
@@ -310,11 +307,6 @@ class IndodaxAPI:
             return []
 
     def get_ohlcv(self, pair: str, tf: str = "5", limit: int = 100) -> List[dict]:
-        """
-        Ambil OHLCV dengan 4 lapis fallback.
-        Hasil di-cache per iterasi untuk menghindari request berulang.
-        tf = timeframe dalam menit: "1","5","15","30","60","240"
-        """
         # Cek cache (reset tiap iterasi lewat clear_ohlcv_cache)
         cache_key = f"{pair}_{tf}"
         if cache_key in self._ohlcv_cache:
@@ -478,6 +470,11 @@ class IndodaxAPI:
         return []
 
     def _build_ohlcv_from_ticker(self, pair: str, limit: int = 100) -> List[dict]:
+        """
+        Fallback akhir: candle sintetis dari ticker.
+        Bot tetap jalan tapi TIDAK akan eksekusi trade
+        karena sinyal tidak reliable dari data sintetis.
+        """
         try:
             ticker = self.get_ticker(pair)
             price  = float(ticker.get("last", 0) or 0)
@@ -573,6 +570,11 @@ class IndodaxAPI:
         })
 
     def place_sell_order(self, pair: str, price: float, coin_amount: float) -> dict:
+        """
+        Eksekusi SELL order.
+        Gunakan harga bid (beli terbaik) dari ticker agar order pasti terisi.
+        Jika tidak ada bid, gunakan price * 0.999 (sedikit di bawah market).
+        """
         coin = pair.replace("_idr", "")
 
         ticker = self._ticker_cache.get(pair, {})
@@ -609,10 +611,15 @@ class IndodaxAPI:
             return 0.0
 
     def get_coin_balance(self, pair: str) -> float:
+        """Ambil saldo koin real dari akun Indodax."""
         coin = pair.replace("_idr", "")
         try:
-            return float(self.get_balance().get("balance", {}).get(coin, 0) or 0)
-        except Exception:
+            bal = float(self.get_balance().get("balance", {}).get(coin, 0) or 0)
+            logger.info(f"[API] Saldo {coin.upper()}: {bal:.8f}")
+            return bal
+        except Exception as e:
+            logger.warning(f"[API] get_coin_balance {pair}: {e}")
+            return 0.0
             return 0.0
 
     def get_current_price(self, pair: str) -> Optional[float]:
@@ -629,6 +636,10 @@ class IndodaxAPI:
             return {}
 
     def test_connection(self) -> dict:
+        """
+        Test semua endpoint dan tampilkan status.
+        Jalankan: python -c "from api import IndodaxAPI; api=IndodaxAPI(); print(api.test_connection())"
+        """
         results = {}
         try:
             t = self.get_ticker("btc_idr")
