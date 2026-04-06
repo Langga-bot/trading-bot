@@ -54,8 +54,8 @@ STRATEGY_CONFIG = {
 }
 
 RISK_CONFIG = {
-    "max_open_positions": 5,
-    "trade_size_pct":     0.20,
+    "max_open_positions": 2,
+    "trade_size_pct":     0.50,
 
     "initial_balance_idr": 0,
 
