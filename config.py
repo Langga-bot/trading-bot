@@ -30,6 +30,7 @@ TRADING_PAIRS: List[str] = [
     "myx_idr",
     "trx_idr",
     "jellyjelly_idr",
+    "drx_idr",
 ]
 
 STRATEGY_CONFIG = {
@@ -47,10 +48,33 @@ STRATEGY_CONFIG = {
     "bb_period": 20,
     "bb_std": 2.0,
 
-    "volume_spike_multiplier": 1.5,
+    "volume_spike_multiplier": 2,
 
-    "min_buy_score": 6,
-    "min_sell_score": 6,
+    "min_buy_score": 7.5,
+    "min_sell_score": 7.5,
+    
+    "taker_fee_pct": 0.003,           # 0.3% per transaksi
+ 
+    # Minimum profit bersih setelah fee sebelum strategy sell boleh jual
+    "min_profit_to_sell_pct": 0.008,  # 0.8%
+ 
+    # Cooldown setelah SELL sebelum boleh BUY lagi di pair yang sama (menit)
+    "buy_cooldown_minutes": 25,
+ 
+    # Konfirmasi multi-candle untuk BUY
+    # Sinyal harus konsisten selama N candle terakhir
+    "signal_confirm_candles": 3,
+ 
+    # Minimum kekuatan trend sebelum BUY diizinkan
+    "min_trend_strength": 0.08,       # 0.08% slope per candle
+ 
+    # Minimum BB width (volatilitas) sebelum beli
+    # Pasar terlalu sempit = potensi breakout rendah
+    "min_bb_width": 0.01,             # 1% lebar band relatif
+ 
+    # Batas RSI untuk konfirmasi BUY (tidak beli jika RSI terlalu tinggi)
+    "max_rsi_for_buy":  65,           # RSI di atas ini = jangan beli
+    "min_rsi_for_sell": 45, 
 }
 
 RISK_CONFIG = {
@@ -64,7 +88,7 @@ RISK_CONFIG = {
     "trailing_stop_pct":  0.015,
 
     "max_daily_loss_idr": 500_000,
-    "max_trades_per_day": 15,
+    "max_trades_per_day": 30,
 
     "min_order_idr":      10_000,
 }
