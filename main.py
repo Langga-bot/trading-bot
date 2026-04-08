@@ -9,6 +9,9 @@ import json
 import threading
 import requests
 from datetime import datetime, time as dt_time
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Setup logging sebelum import modul lain
 def setup_logging(level: str = "INFO") -> None:
@@ -154,7 +157,7 @@ class TelegramCommandThread(threading.Thread):
 
     def _cmd_help(self, mid, chat_id=None):
         self._send(
-           f"{E['rocket']} <b>Selamat datang di Indodax Trading Bot!</b>\n"
+            f"{E['rocket']} <b>Selamat datang di Indodax Trading Bot!</b>\n"
             f"<code>{DLINE}</code>\n\n"
             f"{E['robot']} Bot trading otomatis multi-strategi.\n\n"
             f"<b>Perintah tersedia:</b>\n"
@@ -610,7 +613,6 @@ class TelegramCommandThread(threading.Thread):
 
 
     def run(self):
-        """Loop long polling — berjalan sebagai daemon thread."""
         self.log.info("[CMD] Telegram command handler thread dimulai")
         self._send(
             f"{E['check']} <b>Bot + Command Handler aktif!</b>\n"
@@ -659,6 +661,7 @@ class TelegramCommandThread(threading.Thread):
 
 
 class TradingBot:
+
 
     def __init__(self, dry_run: bool = None, start_cmd_thread: bool = True):
         self.api      = IndodaxAPI()
@@ -728,6 +731,7 @@ class TradingBot:
         signal.signal(signal.SIGINT, handler)
         signal.signal(signal.SIGTERM, handler)
 
+    # ─── MAIN LOOP ──────────────────────────────────────────────────────────
 
     def run(self) -> None:
         """Jalankan bot dalam loop infinite."""
@@ -772,9 +776,7 @@ class TradingBot:
                 logger.info("[BOT] PAUSE aktif (via Telegram /pause) - skip iterasi ini")
                 time.sleep(30)
                 continue
-                
-            # Prioritas: pair dengan posisi terbuka SELALU diproses meski
-            # tidak ada di TRADING_PAIRS (untuk SL/TP monitoring)
+
             open_pairs = list(self.risk.positions.keys())
             pairs_to_process = []
             for op in open_pairs:
@@ -895,7 +897,14 @@ class TradingBot:
             return
 
         depth    = self.api.get_depth(pair)
-        decision = self.strategy.analyze_and_decide(candles, depth if depth else None)
+        decision = self.strategy.analyze_and_decide(
+            candles,
+            depth=depth if depth else None,
+            pair=pair,
+            current_price=current_price,
+            entry_price=self.risk.positions.get(pair, None) and
+                        self.risk.positions[pair].entry_price or 0,
+        )
         summary  = self.strategy.get_signal_summary(decision)
         logger.info(f"[BOT] {pair} -> {summary}")
 
@@ -905,8 +914,33 @@ class TradingBot:
 
         if pair in self.risk.positions:
             if decision.action == Signal.SELL:
-                exit_reason = f"STRATEGY SELL: {', '.join(decision.reasons[:2])}"
-                self._execute_sell(pair, current_price, exit_reason, decision)
+                pos        = self.risk.positions[pair]
+                pnl_pct    = (current_price - pos.entry_price) / pos.entry_price * 100
+                sl_pct     = RISK_CONFIG.get("stop_loss_pct", 0.025) * 100
+                tp_pct     = RISK_CONFIG.get("take_profit_pct", 0.03) * 100
+
+                # Strategy SELL hanya diizinkan jika:
+                # 1. Sudah mendekati TP (profit >= 80% dari TP target), ATAU
+                # 2. Sudah mendekati SL (rugi >= 70% dari SL threshold)
+                near_tp = pnl_pct >= tp_pct * 0.8
+                near_sl = pnl_pct <= -(sl_pct * 0.7)
+
+                if near_tp or near_sl:
+                    exit_reason = (
+                        f"STRATEGY SELL ({'+' if pnl_pct>=0 else ''}{pnl_pct:.2f}%): "
+                        f"{', '.join(decision.reasons[:2])}"
+                    )
+                    logger.info(
+                        f"[BOT] Strategy SELL diizinkan {pair} | "
+                        f"PnL={pnl_pct:+.2f}% | near_tp={near_tp} near_sl={near_sl}"
+                    )
+                    self._execute_sell(pair, current_price, exit_reason, decision)
+                else:
+                    logger.info(
+                        f"[BOT] Strategy SELL DIBLOKIR {pair} | "
+                        f"PnL={pnl_pct:+.2f}% belum mencapai TP={tp_pct:.1f}% atau SL={sl_pct:.1f}% | "
+                        f"Tunggu SL/TP otomatis."
+                    )
             return
 
         if decision.action != Signal.BUY:
@@ -1132,6 +1166,9 @@ class TradingBot:
         pnl_data = self.risk.close_position(pair, price)
         if not pnl_data:
             return
+
+        # Aktifkan cooldown agar pair ini tidak langsung dibeli lagi
+        self.strategy.record_sell(pair)
 
         try:
             self.db.delete_open_position(pair)
