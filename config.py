@@ -35,46 +35,46 @@ TRADING_PAIRS: List[str] = [
 
 STRATEGY_CONFIG = {
     "ema_fast": 7,
-    "ema_slow": 25,
-
-    "rsi_period": 14,
+    "ema_slow":  25,
+ 
+    "rsi_period":     14,
     "rsi_overbought": 70,
-    "rsi_oversold": 30,
-
-    "macd_fast": 12,
-    "macd_slow": 26,
-    "macd_signal": 9,
-
+    "rsi_oversold":   30,
+ 
+    "macd_fast":   12,
+    "macd_slow":   26,
+    "macd_signal":  9,
+ 
     "bb_period": 20,
-    "bb_std": 2.0,
-
-    "volume_spike_multiplier": 2,
-
-    "min_buy_score": 7.5,
+    "bb_std":     2.0,
+ 
+    "volume_spike_multiplier": 2.0,   # naik dari 1.5 — lebih selektif
+ 
+    # Skor minimum untuk eksekusi BUY/SELL
+    "min_buy_score":  7.5,
     "min_sell_score": 7.5,
-    
+ 
+    # Fee Indodax per transaksi (buy + sell = 0.6% round trip)
     "taker_fee_pct": 0.003,           # 0.3% per transaksi
  
     # Minimum profit bersih setelah fee sebelum strategy sell boleh jual
-    "min_profit_to_sell_pct": 0.008,  # 0.8%
+    "min_profit_to_sell_pct": 0.008, 
  
     # Cooldown setelah SELL sebelum boleh BUY lagi di pair yang sama (menit)
-    "buy_cooldown_minutes": 25,
+    "buy_cooldown_minutes": 30,
  
     # Konfirmasi multi-candle untuk BUY
-    # Sinyal harus konsisten selama N candle terakhir
     "signal_confirm_candles": 3,
  
     # Minimum kekuatan trend sebelum BUY diizinkan
     "min_trend_strength": 0.08,       # 0.08% slope per candle
  
     # Minimum BB width (volatilitas) sebelum beli
-    # Pasar terlalu sempit = potensi breakout rendah
     "min_bb_width": 0.01,             # 1% lebar band relatif
  
-    # Batas RSI untuk konfirmasi BUY (tidak beli jika RSI terlalu tinggi)
-    "max_rsi_for_buy":  65,           # RSI di atas ini = jangan beli
-    "min_rsi_for_sell": 45, 
+    # Batas RSI untuk konfirmasi BUY
+    "max_rsi_for_buy":  65,
+    "min_rsi_for_sell": 45,     
 }
 
 RISK_CONFIG = {
