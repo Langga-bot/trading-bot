@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict
@@ -7,7 +7,7 @@ from typing import List, Optional, Dict
 import pandas as pd
 
 from indicators import TechnicalIndicators, IndicatorResult
-from config import STRATEGY_CONFIG, RISK_CONFIG
+from config import STRATEGY_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +15,8 @@ FEE_PCT         = STRATEGY_CONFIG.get("taker_fee_pct", 0.003)
 MIN_PROFIT_SELL = STRATEGY_CONFIG.get("min_profit_to_sell_pct", 0.008)
 MAX_RSI_BUY     = STRATEGY_CONFIG.get("max_rsi_for_buy", 65)
 MIN_RSI_SELL    = STRATEGY_CONFIG.get("min_rsi_for_sell", 45)
-MIN_BB_WIDTH    = STRATEGY_CONFIG.get("min_bb_width", 0.01)
-MIN_TREND_STR   = STRATEGY_CONFIG.get("min_trend_strength", 0.08)
-CONFIRM_CANDLES = STRATEGY_CONFIG.get("signal_confirm_candles", 3)
+MIN_BB_WIDTH    = STRATEGY_CONFIG.get("min_bb_width", 0.008)
+COOLDOWN_MIN    = STRATEGY_CONFIG.get("buy_cooldown_minutes", 30)
 
 
 class Signal(Enum):
@@ -36,191 +35,208 @@ class StrategySignal:
 
 @dataclass
 class FinalDecision:
-    action:             Signal            = Signal.HOLD
-    confidence:         float             = 0.0
-    strategies_agreed:  List[str]         = field(default_factory=list)
-    reasons:            List[str]         = field(default_factory=list)
-    indicator_result:   Optional[IndicatorResult] = None
-    blocked_reason:     str               = ""
+    action:            Signal              = Signal.HOLD
+    confidence:        float               = 0.0
+    strategies_agreed: List[str]           = field(default_factory=list)
+    reasons:           List[str]           = field(default_factory=list)
+    indicator_result:  Optional[IndicatorResult] = None
+    blocked_reason:    str                 = ""
 
 
 class TrendFollowingStrategy:
     """
     Strategi 1: Trend Following
-    Lebih ketat — butuh 4 dari 5 kondisi untuk BUY (sebelumnya 3 dari 5).
-    Tambah konfirmasi: trend harus uptrend, bukan hanya EMA cross.
+    Sinyal berdasarkan arah trend jangka menengah.
+    BUY butuh 3 dari 4 kondisi (sebelumnya 4/5 — terlalu ketat).
     """
     NAME = "TrendFollowing"
 
-    def evaluate(self, ind: IndicatorResult, df: pd.DataFrame = None) -> StrategySignal:
-        buy  = []
-        sell = []
+    def evaluate(self, ind: IndicatorResult) -> StrategySignal:
+        buy_cond  = []
+        sell_cond = []
 
+        # 1. Posisi EMA
         if ind.ema_fast > ind.ema_slow:
-            buy.append("EMA7>EMA25")
+            buy_cond.append("EMA_bull")
         else:
-            sell.append("EMA7<EMA25")
+            sell_cond.append("EMA_bear")
 
+        # 2. Cross event (sinyal kuat — bobot ekstra)
         if ind.ema_cross == "golden":
-            buy.append("GoldenCross")
+            buy_cond.extend(["GoldenCross", "GoldenCross_bonus"])
         elif ind.ema_cross == "death":
-            sell.append("DeathCross")
+            sell_cond.extend(["DeathCross", "DeathCross_bonus"])
 
-        if ind.rsi_signal == "oversold":
-            buy.append(f"RSI_oversold({ind.rsi:.0f})")
-        elif ind.rsi_signal == "overbought":
-            sell.append(f"RSI_overbought({ind.rsi:.0f})")
-        elif ind.rsi < 50:
-            buy.append(f"RSI_ok({ind.rsi:.0f})")
+        # 3. RSI
+        if ind.rsi_signal == "oversold" or ind.rsi < 40:
+            buy_cond.append(f"RSI_low({ind.rsi:.0f})")
+        elif ind.rsi_signal == "overbought" or ind.rsi > 70:
+            sell_cond.append(f"RSI_high({ind.rsi:.0f})")
+        elif ind.rsi < 55:
+            buy_cond.append(f"RSI_ok({ind.rsi:.0f})")
         else:
-            sell.append(f"RSI_high({ind.rsi:.0f})")
+            sell_cond.append(f"RSI_elev({ind.rsi:.0f})")
 
-        if ind.macd_direction == "bullish" or ind.macd_hist > 0:
-            buy.append("MACD+")
-        elif ind.macd_direction == "bearish" or ind.macd_hist < 0:
-            sell.append("MACD-")
+        # 4. MACD
+        if ind.macd_hist > 0:
+            buy_cond.append("MACD+")
+        elif ind.macd_hist < 0:
+            sell_cond.append("MACD-")
 
+        # 5. Trend arah
         if ind.trend == "uptrend":
-            buy.append("Uptrend")
+            buy_cond.append("Uptrend")
         elif ind.trend == "downtrend":
-            sell.append("Downtrend")
-        else:
-            sell.append("Sideways")   # sideways tidak ideal untuk trend following
+            sell_cond.append("Downtrend")
 
-        n_buy  = len(buy)
-        n_sell = len(sell)
+        n_buy  = len(buy_cond)
+        n_sell = len(sell_cond)
 
-        # BUY butuh ≥4 dari 5 kondisi (lebih ketat dari sebelumnya)
-        if n_buy >= 4 and n_buy > n_sell:
+        # BUY butuh 3 dari 4+ kondisi
+        if n_buy >= 3 and n_buy > n_sell:
             return StrategySignal(
                 self.NAME, Signal.BUY,
                 strength=min(n_buy / 5.0, 1.0),
-                reason=" | ".join(buy),
+                reason=" | ".join(buy_cond),
             )
-        elif n_sell >= 4 and n_sell > n_buy:
+        elif n_sell >= 3 and n_sell > n_buy:
             return StrategySignal(
                 self.NAME, Signal.SELL,
                 strength=min(n_sell / 5.0, 1.0),
-                reason=" | ".join(sell),
+                reason=" | ".join(sell_cond),
             )
         return StrategySignal(
             self.NAME, Signal.HOLD,
-            reason=f"Tidak cukup konfirmasi (buy={n_buy}, sell={n_sell})",
+            reason=f"Konfirmasi kurang (buy={n_buy}, sell={n_sell})",
         )
 
 
 class MomentumStrategy:
+    """
+    Strategi 2: Momentum
+    Cari kondisi momentum yang sedang membangun, bukan yang sudah terlambat.
+    Bekerja di SEMUA kondisi pasar (tidak hanya sideways).
+    """
     NAME = "Momentum"
 
-    def evaluate(self, ind: IndicatorResult, df: pd.DataFrame = None) -> StrategySignal:
-        score_buy  = 0
-        score_sell = 0
-        reasons_b  = []
-        reasons_s  = []
+    def evaluate(self, ind: IndicatorResult) -> StrategySignal:
+        score_b = 0
+        score_s = 0
+        rsn_b   = []
+        rsn_s   = []
 
-        # MACD crossover = momentum kuat (bobot tinggi)
-        if hasattr(ind, '_macd_crossover') and ind._macd_crossover:
-            score_buy += 2
-            reasons_b.append("MACD_crossover")
-        elif ind.macd_hist > 0 and ind.macd_direction == "bullish":
-            score_buy += 1
-            reasons_b.append("MACD_bullish")
+        # MACD crossover = momentum terkuat
+        if ind.macd_direction == "bullish" and ind.macd_hist > 0:
+            score_b += 2
+            rsn_b.append("MACD_bull")
+        elif ind.macd_direction == "bearish" and ind.macd_hist < 0:
+            score_s += 2
+            rsn_s.append("MACD_bear")
 
-        if hasattr(ind, '_macd_crossunder') and ind._macd_crossunder:
-            score_sell += 2
-            reasons_s.append("MACD_crossunder")
-        elif ind.macd_hist < 0 and ind.macd_direction == "bearish":
-            score_sell += 1
-            reasons_s.append("MACD_bearish")
-
-        # RSI momentum
-        if 30 <= ind.rsi <= 50:
-            score_buy += 1
-            reasons_b.append(f"RSI_rising({ind.rsi:.0f})")
-        elif ind.rsi >= 65:
-            score_sell += 1
-            reasons_s.append(f"RSI_high({ind.rsi:.0f})")
+        # RSI momentum zone
+        if 25 <= ind.rsi <= 50:
+            score_b += 1
+            rsn_b.append(f"RSI_zone({ind.rsi:.0f})")
+        elif ind.rsi > 65:
+            score_s += 1
+            rsn_s.append(f"RSI_high({ind.rsi:.0f})")
 
         # Bollinger Band position
         if ind.bb_signal in ("lower_touch", "near_lower"):
-            score_buy += 1
-            reasons_b.append(f"BB_{ind.bb_signal}")
+            score_b += 2
+            rsn_b.append(f"BB_{ind.bb_signal}")
         elif ind.bb_signal in ("upper_touch", "near_upper"):
-            score_sell += 1
-            reasons_s.append(f"BB_{ind.bb_signal}")
+            score_s += 2
+            rsn_s.append(f"BB_{ind.bb_signal}")
 
-        # Volume konfirmasi
-        if ind.volume_spike and ind.trend == "uptrend":
-            score_buy += 1
-            reasons_b.append("Volume_spike_up")
-        elif ind.volume_spike and ind.trend == "downtrend":
-            score_sell += 1
-            reasons_s.append("Volume_spike_down")
+        # Volume konfirmasi arah
+        if ind.volume_spike:
+            if ind.ema_fast > ind.ema_slow:
+                score_b += 1
+                rsn_b.append("Vol_bull")
+            else:
+                score_s += 1
+                rsn_s.append("Vol_bear")
 
-        # Butuh skor ≥3 untuk sinyal
-        if score_buy >= 3 and score_buy > score_sell:
+        if score_b >= 3 and score_b > score_s:
             return StrategySignal(
                 self.NAME, Signal.BUY,
-                strength=min(score_buy / 5.0, 1.0),
-                reason=" | ".join(reasons_b),
+                strength=min(score_b / 6.0, 1.0),
+                reason=" | ".join(rsn_b),
             )
-        elif score_sell >= 3 and score_sell > score_buy:
+        elif score_s >= 3 and score_s > score_b:
             return StrategySignal(
                 self.NAME, Signal.SELL,
-                strength=min(score_sell / 5.0, 1.0),
-                reason=" | ".join(reasons_s),
+                strength=min(score_s / 6.0, 1.0),
+                reason=" | ".join(rsn_s),
             )
         return StrategySignal(
             self.NAME, Signal.HOLD,
-            reason=f"Momentum lemah (buy={score_buy}, sell={score_sell})",
+            reason=f"Momentum lemah (b={score_b}, s={score_s})",
         )
 
 
 class MeanReversionStrategy:
+    """
+    Strategi 3: Mean Reversion
+    Aktif di SEMUA kondisi (bukan hanya sideways).
+    Berbeda dari versi lama: tidak memblokir diri sendiri saat trending.
+    Hanya beli saat kondisi sangat oversold, hanya jual saat sangat overbought.
+    """
     NAME = "MeanReversion"
 
-    def evaluate(self, ind: IndicatorResult, df: pd.DataFrame = None) -> StrategySignal:
-        # Mean reversion kurang efektif di trending market
-        if ind.trend != "sideways":
-            return StrategySignal(
-                self.NAME, Signal.HOLD,
-                reason=f"Trend={ind.trend}, MeanReversion skip",
-            )
-
+    def evaluate(self, ind: IndicatorResult) -> StrategySignal:
         rsi_os = STRATEGY_CONFIG["rsi_oversold"]
         rsi_ob = STRATEGY_CONFIG["rsi_overbought"]
 
-        # BUY: harga di lower band + RSI oversold (keduanya harus terpenuhi)
-        if ind.bb_signal == "lower_touch" and ind.rsi <= rsi_os + 5:
+        # BUY: BB lower touch + RSI oversold (syarat keduanya)
+        if ind.bb_signal == "lower_touch" and ind.rsi <= rsi_os + 8:
             return StrategySignal(
                 self.NAME, Signal.BUY, strength=0.9,
-                reason=f"BB lower touch | RSI={ind.rsi:.0f} (oversold)",
+                reason=f"BB lower | RSI={ind.rsi:.0f}",
             )
-        if ind.bb_signal == "near_lower" and ind.rsi <= rsi_os:
+        if ind.bb_signal == "near_lower" and ind.rsi <= rsi_os + 3:
             return StrategySignal(
                 self.NAME, Signal.BUY, strength=0.7,
-                reason=f"BB near lower | RSI={ind.rsi:.0f} (oversold)",
+                reason=f"BB near_lower | RSI={ind.rsi:.0f}",
             )
 
-        # SELL: harga di upper band + RSI overbought (keduanya harus terpenuhi)
-        if ind.bb_signal == "upper_touch" and ind.rsi >= rsi_ob - 5:
+        # SELL: BB upper touch + RSI overbought (syarat keduanya)
+        if ind.bb_signal == "upper_touch" and ind.rsi >= rsi_ob - 8:
             return StrategySignal(
                 self.NAME, Signal.SELL, strength=0.9,
-                reason=f"BB upper touch | RSI={ind.rsi:.0f} (overbought)",
+                reason=f"BB upper | RSI={ind.rsi:.0f}",
             )
-        if ind.bb_signal == "near_upper" and ind.rsi >= rsi_ob:
+        if ind.bb_signal == "near_upper" and ind.rsi >= rsi_ob - 3:
             return StrategySignal(
                 self.NAME, Signal.SELL, strength=0.7,
-                reason=f"BB near upper | RSI={ind.rsi:.0f} (overbought)",
+                reason=f"BB near_upper | RSI={ind.rsi:.0f}",
             )
 
         return StrategySignal(
             self.NAME, Signal.HOLD,
-            reason=f"BB={ind.bb_signal}, RSI={ind.rsi:.0f}",
+            reason=f"BB={ind.bb_signal} RSI={ind.rsi:.0f}",
         )
 
 
 class StrategyEngine:
+    """
+    Engine voting dengan filter kualitas.
+
+    Urutan pemeriksaan BUY:
+      1. Hitung skor dari 3 strategi
+      2. Cek buy_score >= 7.5
+      3. Filter RSI (tidak terlalu tinggi)
+      4. Filter BB width (volatilitas cukup)
+      5. Filter cooldown
+      6. Konfirmasi candle sebelumnya (bukan multi-analysis berat)
+
+    Urutan pemeriksaan SELL via strategi:
+      1. Hitung skor
+      2. Filter profit bersih setelah fee
+      3. Filter RSI (tidak jual saat oversold)
+    """
+
     def __init__(self):
         self.indicators   = TechnicalIndicators()
         self.strategies   = [
@@ -230,89 +246,89 @@ class StrategyEngine:
         ]
         self.min_buy_score  = STRATEGY_CONFIG["min_buy_score"]
         self.min_sell_score = STRATEGY_CONFIG["min_sell_score"]
-
-        # Cooldown tracking: pair -> waktu sell terakhir
         self._last_sell_time: Dict[str, datetime] = {}
-        self._cooldown_min = STRATEGY_CONFIG.get("buy_cooldown_minutes", 30)
 
     def record_sell(self, pair: str) -> None:
-        """Dipanggil dari main.py setelah SELL eksekusi."""
+        """Dipanggil dari main.py setelah SELL. Aktifkan cooldown."""
         self._last_sell_time[pair] = datetime.now()
-        logger.info(f"[STRATEGY] Cooldown dimulai untuk {pair} ({self._cooldown_min} menit)")
+        logger.info(f"[STRATEGY] Cooldown {COOLDOWN_MIN} menit dimulai: {pair}")
 
-    def _in_cooldown(self, pair: str) -> bool:
+    def _in_cooldown(self, pair: str) -> tuple:
+        """Return (True, menit_tersisa) atau (False, 0)."""
         last = self._last_sell_time.get(pair)
         if not last:
-            return False
-        elapsed = (datetime.now() - last).total_seconds() / 60
-        if elapsed < self._cooldown_min:
-            logger.info(
-                f"[STRATEGY] {pair} dalam cooldown — {self._cooldown_min - elapsed:.0f} menit lagi"
-            )
-            return True
-        return False
+            return False, 0
+        elapsed   = (datetime.now() - last).total_seconds() / 60
+        remaining = COOLDOWN_MIN - elapsed
+        if remaining > 0:
+            return True, remaining
+        return False, 0
 
-    def _check_multi_candle(
-        self, df: pd.DataFrame, signal: Signal, n: int = CONFIRM_CANDLES
-    ) -> bool:
-        if len(df) < n + 10:
-            return False
+    def _prev_candle_confirms_buy(self, df: pd.DataFrame) -> bool:
+        """
+        Cek candle ke-2 dari belakang untuk konfirmasi.
+        Ringan: hanya cek apakah kondisi dasar sudah terpenuhi di candle sebelumnya.
+        Tidak re-run full analysis — hanya cek harga dan indikator sederhana.
+        """
+        if len(df) < 35:
+            return True   # tidak cukup data, skip konfirmasi
+
         try:
-            confirms = 0
-            for i in range(1, n + 1):
-                subset  = df.iloc[:-i] if i > 0 else df
-                if len(subset) < 30:
-                    break
-                ind_sub = self.indicators.analyze(subset)
-                if signal == Signal.BUY:
-                    is_ok = (ind_sub.ema_fast > ind_sub.ema_slow and
-                             ind_sub.rsi < MAX_RSI_BUY and
-                             ind_sub.macd_hist > 0)
-                else:
-                    is_ok = (ind_sub.ema_fast < ind_sub.ema_slow or
-                             ind_sub.rsi > 60)
-                if is_ok:
-                    confirms += 1
+            # Ambil subset tanpa candle terakhir
+            df_prev = df.iloc[:-1]
+            ind_prev = self.indicators.analyze(df_prev)
 
-            result = confirms >= (n - 1)   # maks 1 candle boleh berbeda
-            if not result:
+            # Konfirmasi minimal: EMA masih bullish di candle sebelumnya
+            ema_ok  = ind_prev.ema_fast >= ind_prev.ema_slow * 0.999
+            rsi_ok  = ind_prev.rsi < MAX_RSI_BUY + 5
+            # Tidak butuh MACD positif — terlalu ketat
+
+            if not ema_ok:
                 logger.debug(
-                    f"[STRATEGY] Multi-candle gagal: {confirms}/{n} candle konfirmasi"
+                    f"[STRATEGY] Prev candle EMA bearish "
+                    f"({ind_prev.ema_fast:.0f} < {ind_prev.ema_slow:.0f})"
                 )
-            return result
+                return False
+            if not rsi_ok:
+                logger.debug(f"[STRATEGY] Prev candle RSI tinggi ({ind_prev.rsi:.0f})")
+                return False
+            return True
         except Exception as e:
-            logger.debug(f"[STRATEGY] Multi-candle check error: {e}")
-            return False
+            logger.debug(f"[STRATEGY] prev_candle_check error: {e}")
+            return True   # jika error, tidak blokir
 
     def analyze_and_decide(
         self,
-        candles: List[dict],
-        depth: Optional[dict]    = None,
-        pair:   str              = "",
-        current_price: float     = 0,
-        entry_price:   float     = 0,
+        candles:       List[dict],
+        depth:         Optional[dict] = None,
+        pair:          str            = "",
+        current_price: float          = 0,
+        entry_price:   float          = 0,
     ) -> FinalDecision:
+        """Pipeline utama analisis dan keputusan."""
         decision = FinalDecision()
 
         df = self.indicators.prepare_dataframe(candles)
         if df.empty or len(df) < 30:
-            decision.reasons.append("Data tidak cukup untuk analisis")
+            decision.reasons.append("Data candle tidak cukup")
             return decision
 
         ind = self.indicators.analyze(df, depth)
         decision.indicator_result = ind
 
+        # ── Jalankan 3 strategi ──
         signals: List[StrategySignal] = []
-        for strategy in self.strategies:
+        for strat in self.strategies:
             try:
-                sig = strategy.evaluate(ind, df)
+                sig = strat.evaluate(ind)
                 signals.append(sig)
                 logger.debug(f"[STRATEGY] {sig.name}: {sig.signal.value} | {sig.reason}")
             except Exception as e:
-                logger.warning(f"[STRATEGY] {strategy.NAME} error: {e}")
+                logger.warning(f"[STRATEGY] {strat.NAME} error: {e}")
 
-        buy_score  = 0.0
-        sell_score = 0.0
+        # ── Hitung skor ──
+        buy_score   = 0.0
+        sell_score  = 0.0
         buy_agreed  = []
         sell_agreed = []
 
@@ -328,34 +344,35 @@ class StrategyEngine:
             else:
                 decision.reasons.append(f"[{sig.name}] HOLD: {sig.reason}")
 
+        # Tambah composite score dari indikator
         buy_score  += ind.buy_score
         sell_score += ind.sell_score
 
         logger.info(
             f"[STRATEGY] Buy={buy_score:.1f} | Sell={sell_score:.1f} | "
-            f"RSI={ind.rsi:.1f} | Trend={ind.trend} | BB={ind.bb_signal}"
+            f"RSI={ind.rsi:.1f} | Trend={ind.trend} | BB={ind.bb_signal} | "
+            f"EMA({ind.ema_fast:.0f}/{ind.ema_slow:.0f})"
         )
 
-        is_buy_candidate = (
-            buy_score >= self.min_buy_score and buy_score > sell_score
-        )
-        if is_buy_candidate:
-            block = self._check_buy_filters(ind, df, pair, buy_score)
+        # ═══ EVALUASI BUY ════════════════════════════════════════════════════
+        if buy_score >= self.min_buy_score and buy_score > sell_score:
+            block = self._filter_buy(ind, df, pair)
             if block:
                 decision.blocked_reason = block
-                logger.info(f"[STRATEGY] BUY diblokir: {block}")
-                decision.action = Signal.HOLD
+                decision.action         = Signal.HOLD
+                logger.info(f"[STRATEGY] BUY diblokir [{pair}]: {block}")
             else:
-                decision.action             = Signal.BUY
-                decision.confidence         = min(buy_score / 10, 1.0)
-                decision.strategies_agreed  = buy_agreed
+                decision.action            = Signal.BUY
+                decision.confidence        = min(buy_score / 10, 1.0)
+                decision.strategies_agreed = buy_agreed
 
+        # ═══ EVALUASI SELL via strategi ══════════════════════════════════════
         elif sell_score >= self.min_sell_score and sell_score > buy_score:
-            block = self._check_sell_filters(ind, pair, current_price, entry_price)
+            block = self._filter_sell(ind, pair, current_price, entry_price)
             if block:
                 decision.blocked_reason = block
-                logger.info(f"[STRATEGY] SELL diblokir: {block}")
-                decision.action = Signal.HOLD
+                decision.action         = Signal.HOLD
+                logger.info(f"[STRATEGY] SELL diblokir [{pair}]: {block}")
             else:
                 decision.action            = Signal.SELL
                 decision.confidence        = min(sell_score / 10, 1.0)
@@ -365,56 +382,54 @@ class StrategyEngine:
 
         return decision
 
-    def _check_buy_filters(
-        self, ind: IndicatorResult, df: pd.DataFrame,
-        pair: str, buy_score: float
+    def _filter_buy(
+        self, ind: IndicatorResult, df: pd.DataFrame, pair: str
     ) -> str:
-        # 1. RSI terlalu tinggi — jangan beli saat overbought
+        """
+        Filter kualitas untuk BUY.
+        Return: string alasan blokir jika ada, '' jika lolos semua.
+        """
+
+        # 1. RSI terlalu tinggi — risiko beli di puncak
         if ind.rsi > MAX_RSI_BUY:
-            return f"RSI={ind.rsi:.0f} terlalu tinggi (max {MAX_RSI_BUY})"
+            return f"RSI {ind.rsi:.0f} terlalu tinggi (max {MAX_RSI_BUY})"
 
-        # 2. Volatilitas terlalu rendah — tidak ada ruang gerak
+        # 2. Volatilitas terlalu rendah
         if ind.bb_width < MIN_BB_WIDTH:
-            return f"BB width={ind.bb_width:.3f} terlalu sempit (min {MIN_BB_WIDTH})"
+            return f"Volatilitas terlalu rendah (BB width {ind.bb_width:.4f} < {MIN_BB_WIDTH})"
 
-        # 3. Trend terlalu lemah di pasar sideways
-        if ind.trend == "sideways" and buy_score < 8.0:
-            return f"Trend sideways dan skor tidak cukup kuat ({buy_score:.1f} < 8.0)"
+        # 3. Cooldown setelah sell
+        in_cd, remaining = self._in_cooldown(pair)
+        if in_cd:
+            return f"Cooldown aktif: {remaining:.0f} menit lagi"
 
-        # 4. Harga mendekati resistance — risiko reversal
-        if ind.resistance > 0 and ind.ema_fast > 0:
-            dist_to_res = (ind.resistance - ind.ema_fast) / ind.ema_fast
-            if dist_to_res < 0.005:   # kurang dari 0.5% dari resistance
-                return f"Harga terlalu dekat resistance ({dist_to_res*100:.2f}%)"
+        # 4. Konfirmasi candle sebelumnya (ringan)
+        if not self._prev_candle_confirms_buy(df):
+            return "Candle sebelumnya tidak konfirmasi (EMA atau RSI bermasalah)"
 
-        # 5. Cooldown setelah sell
-        if pair and self._in_cooldown(pair):
-            elapsed = (datetime.now() - self._last_sell_time[pair]).total_seconds() / 60
-            remaining = self._cooldown_min - elapsed
-            return f"Cooldown aktif — {remaining:.0f} menit lagi"
+        return ""   # lolos semua filter
 
-        # 6. Multi-candle confirmation
-        if not self._check_multi_candle(df, Signal.BUY):
-            return "Multi-candle konfirmasi gagal (sinyal tidak konsisten)"
-
-        return ""   # semua filter lulus
-
-    def _check_sell_filters(
+    def _filter_sell(
         self, ind: IndicatorResult,
         pair: str, current_price: float, entry_price: float
     ) -> str:
-
+        """
+        Filter untuk SELL via strategi.
+        SL/TP TIDAK melewati filter ini — langsung eksekusi.
+        """
+        # 1. Profit bersih belum menutup fee
         if entry_price > 0 and current_price > 0:
-            gross_pnl_pct = (current_price - entry_price) / entry_price
-            net_pnl_pct   = gross_pnl_pct - (FEE_PCT * 2)   # fee beli + jual
-            if net_pnl_pct < MIN_PROFIT_SELL:
+            gross_pct = (current_price - entry_price) / entry_price
+            net_pct   = gross_pct - (FEE_PCT * 2)
+            if net_pct < MIN_PROFIT_SELL:
                 return (
-                    f"Profit bersih {net_pnl_pct*100:.2f}% "
-                    f"belum menutup fee (min {MIN_PROFIT_SELL*100:.1f}%)"
+                    f"Profit bersih {net_pct*100:.2f}% "
+                    f"belum cukup (min {MIN_PROFIT_SELL*100:.1f}% setelah fee)"
                 )
 
+        # 2. RSI terlalu rendah — kondisi oversold, potensi reversal naik
         if ind.rsi < MIN_RSI_SELL:
-            return f"RSI={ind.rsi:.0f} terlalu rendah untuk strategy sell"
+            return f"RSI {ind.rsi:.0f} terlalu rendah untuk strategy sell"
 
         return ""
 
@@ -422,13 +437,13 @@ class StrategyEngine:
         ind = decision.indicator_result
         if not ind:
             return "No data"
-        blocked = f" | BLOCKED: {decision.blocked_reason}" if decision.blocked_reason else ""
+        blk = f" | BLOCKED: {decision.blocked_reason}" if decision.blocked_reason else ""
         return (
             f"Action={decision.action.value} | "
             f"Confidence={decision.confidence:.0%} | "
             f"EMA({ind.ema_fast:.0f}/{ind.ema_slow:.0f}) | "
             f"RSI={ind.rsi:.1f} | MACD={ind.macd_hist:.4f} | "
             f"BB={ind.bb_signal} | Trend={ind.trend} | "
-            f"Vol_spike={ind.volume_spike}"
-            f"{blocked}"
+            f"Vol={ind.volume_spike}"
+            f"{blk}"
         )
