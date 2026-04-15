@@ -48,29 +48,24 @@ STRATEGY_CONFIG = {
     "bb_period": 20,
     "bb_std":     2.0,
  
-    "volume_spike_multiplier": 2.0,   # naik dari 1.5 — lebih selektif
+    "volume_spike_multiplier": 2.0,   
  
     # Skor minimum untuk eksekusi BUY/SELL
     "min_buy_score":  7.5,
     "min_sell_score": 7.5,
  
-    # Fee Indodax per transaksi (buy + sell = 0.6% round trip)
-    "taker_fee_pct": 0.003,           # 0.3% per transaksi
+    "taker_fee_pct": 0.003,   
  
-    # Minimum profit bersih setelah fee sebelum strategy sell boleh jual
     "min_profit_to_sell_pct": 0.008, 
  
-    # Cooldown setelah SELL sebelum boleh BUY lagi di pair yang sama (menit)
-    "buy_cooldown_minutes": 30,
+    "buy_cooldown_minutes": 15,
  
     # Konfirmasi multi-candle untuk BUY
     "signal_confirm_candles": 3,
  
-    # Minimum kekuatan trend sebelum BUY diizinkan
-    "min_trend_strength": 0.08,       # 0.08% slope per candle
+    "min_trend_strength": 0.08, 
  
-    # Minimum BB width (volatilitas) sebelum beli
-    "min_bb_width": 0.01,             # 1% lebar band relatif
+    "min_bb_width": 0.01,          
  
     # Batas RSI untuk konfirmasi BUY
     "max_rsi_for_buy":  65,
@@ -78,8 +73,8 @@ STRATEGY_CONFIG = {
 }
 
 RISK_CONFIG = {
-    "max_open_positions": 2,
-    "trade_size_pct":     0.50,
+    "max_open_positions": 4,
+    "trade_size_pct":     0.25,
 
     "initial_balance_idr": 0,
 
